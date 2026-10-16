@@ -1,0 +1,5 @@
+crm.db
+crm.db-*
+crm.backup-*.db
+*.csv
+__pycache__/
