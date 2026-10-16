@@ -1,0 +1,29 @@
+install.sh
+  s_e6d2f4fff8c937::t_eac37bfa74cc85 1-60
+skill/crm/SKILL.md
+  s_e6d2f4fff8c937::t_60e324ea5734e6 1-15
+.gitignore
+  s_e6d2f4fff8c937::t_015179edb5f8a4 1-5
+CLAUDE.md
+  s_e6d2f4fff8c937::t_8fdffe26bf0d3e 1-35
+README.md
+  s_e6d2f4fff8c937::t_c1827c432a0c67 1-92
+crm.py
+  s_e6d2f4fff8c937::t_40040dc097d089 1-1092
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "66814578626b697b2ca6ff04fbdf2c7e6cfcc9e1",
+  "prompts": {},
+  "sessions": {
+    "s_e6d2f4fff8c937": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6ee8ddb-cf8c-4fa1-84e9-739e8a7c57a9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "fletchrichman <frichman3@gmail.com>"
+    }
+  }
+}
