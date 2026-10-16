@@ -1,0 +1,34 @@
+crm.py
+  s_e6d2f4fff8c937::t_40040dc097d089 1-1092
+CLAUDE.md
+  s_e6d2f4fff8c937::t_8fdffe26bf0d3e 1-35
+skill/crm/SKILL.md
+  s_e6d2f4fff8c937::t_60e324ea5734e6 1-15
+.gitignore
+  s_e6d2f4fff8c937::t_015179edb5f8a4 1-5
+LICENSE
+  s_e6d2f4fff8c937::t_3959bc931cf23a 1-21
+README.md
+  s_e6d2f4fff8c937::t_c1827c432a0c67 1-2,7-39,45-97,101
+  s_e6d2f4fff8c937::t_d953416716d626 3-6
+  s_e6d2f4fff8c937::t_e655f8013c81a9 40-44
+  s_e6d2f4fff8c937::t_df9ee85f121c9f 98-100,102-124
+install.sh
+  s_e6d2f4fff8c937::t_eac37bfa74cc85 1-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7171b927e1fe8f8077177820251d5a50d3cd60a8",
+  "prompts": {},
+  "sessions": {
+    "s_e6d2f4fff8c937": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e6ee8ddb-cf8c-4fa1-84e9-739e8a7c57a9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": null
+    }
+  }
+}
