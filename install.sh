@@ -57,4 +57,7 @@ cat <<EOF
    Connections. When the email arrives, unzip it and run:
    python3 "$CRM_DIR/crm.py" sync --linkedin ~/Downloads/Connections.csv
 4. Try it: open Claude Code anywhere and ask "who do I know at Stripe?"
+
+Something missing (old texts, work calendar, Gmail)? Step-by-step setup for every source:
+  $CRM_DIR/SETUP.md
 EOF

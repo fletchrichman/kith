@@ -37,7 +37,7 @@ Gmail or Outlook only reach the CRM if those accounts are added to Apple Mail / 
 - Full Disk Access for the app you run Claude Code from, so it can read Messages, Mail and
   Calendar data.
 
-## Setup (about 5 minutes)
+## Setup (about 15 minutes, plus background download time)
 
 1. Clone this repo somewhere permanent, for example:
 
@@ -52,14 +52,10 @@ Gmail or Outlook only reach the CRM if those accounts are added to Apple Mail / 
 
    It checks Python, installs the `crm` skill into `~/.claude/skills/crm` (pointing at this
    folder), and runs the first sync.
-3. If the sync says **FAILED** for any source, grant Full Disk Access: System Settings >
-   Privacy & Security > Full Disk Access, enable it for Terminal / iTerm / VS Code / Claude
-   (whichever you use), quit and reopen that app, then run `python3 crm.py sync`.
-4. Check your own email addresses with `python3 crm.py me`; add missing aliases with
-   `python3 crm.py me --add you@work.com`. This decides which emails count as sent vs received.
-5. Optional: add LinkedIn. In LinkedIn go to Settings > Data privacy > Get a copy of your data,
-   pick **Connections**, and when the email arrives run
-   `python3 crm.py sync --linkedin ~/Downloads/Connections.csv`. Re-import every few months.
+3. **Get each source syncing: follow [SETUP.md](SETUP.md).** It walks through Full Disk Access,
+   then Contacts, Messages in iCloud, Calendar, Apple Mail (including Gmail settings) and the
+   LinkedIn export, with a troubleshooting table. The first sync usually reports `FAILED` until
+   Full Disk Access is granted. That's expected.
 
 If you move the folder, run `./install.sh --no-sync` again so the skill points at the new path.
 
