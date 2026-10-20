@@ -1,0 +1,34 @@
+.claude-plugin/marketplace.json
+  s_8e9b034f50ca56::t_5847143a9cedc7 1-15
+SETUP.md
+  s_8e9b034f50ca56::t_0b51de57d4c09a 14-16
+crm.py
+  s_8e9b034f50ca56::t_f6d4a20536124c 16-20,141
+.claude-plugin/plugin.json
+  s_8e9b034f50ca56::t_5847143a9cedc7 1-13
+README.md
+  s_8e9b034f50ca56::t_b2506c3c92bb07 121
+  s_8e9b034f50ca56::t_0b51de57d4c09a 16,36-37,43-65,78,93-94,120,122-123,128-129,140
+install.sh
+  s_8e9b034f50ca56::t_0b51de57d4c09a 40-43
+  s_8e9b034f50ca56::t_f6d4a20536124c 31-32
+skills/crm/SKILL.md
+  s_8e9b034f50ca56::t_4ce82f77c1d270 4-18
+  s_8e9b034f50ca56::t_557b0dbaab266e 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "959c353abe34cb35ba1e40e46e2da1d63db8f4f2",
+  "prompts": {},
+  "sessions": {
+    "s_8e9b034f50ca56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f15cd43-53ae-489a-8a1b-9dc0ee63c113",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "fletchrichman <1915836+fletchrichman@users.noreply.github.com>"
+    }
+  }
+}
