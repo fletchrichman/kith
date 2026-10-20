@@ -8,7 +8,7 @@ CRM; it is read live from Messages when asked for. Everything you add by hand
 
 Usage: python3 crm.py <command> [args]   (python3 crm.py -h for the list)
 """
-import argparse, csv, glob, json, os, re, sqlite3, sys
+import argparse, csv, glob, json, os, platform, re, sqlite3, sys
 from datetime import datetime, timezone, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -22,8 +22,11 @@ CALENDAR_DB = os.environ.get("CRM_CALENDAR_DB",
 MAIL_GLOB = os.environ.get("CRM_MAIL_GLOB", f"{HOME}/Library/Mail/V*/MailData/Envelope Index")
 AUTO_SYNC_HOURS = 6  # read commands refresh first if the last sync is older than this
 APPLE_EPOCH = 978307200  # 2001-01-01 in unix seconds
+SETUP_URL = "https://github.com/fletchrichman/kith/blob/main/SETUP.md"
+ISSUES_URL = "https://github.com/fletchrichman/kith/issues"
 
-SCHEMA = """
+# Current schema, for new databases. Existing ones are brought up to date by MIGRATIONS below.
+TABLES = """
 CREATE TABLE IF NOT EXISTS people (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
@@ -72,7 +75,10 @@ CREATE TABLE IF NOT EXISTS email_stats (
   address TEXT PRIMARY KEY, n_in INTEGER, n_out INTEGER, last_in_at TEXT, last_out_at TEXT
 );
 CREATE TABLE IF NOT EXISTS self_addresses (address TEXT PRIMARY KEY, source TEXT);  -- my own emails
-CREATE TABLE IF NOT EXISTS sync_log (source TEXT PRIMARY KEY, last_success_at TEXT, detail TEXT);
+CREATE TABLE IF NOT EXISTS sync_log (
+  source TEXT PRIMARY KEY, last_success_at TEXT, detail TEXT,
+  last_attempt_at TEXT, last_error TEXT, last_error_at TEXT  -- last_error is cleared by the next success
+);
 -- Every merge, so it can be undone: which identities/notes/keys moved from dropped to kept.
 CREATE TABLE IF NOT EXISTS merge_log (
   id INTEGER PRIMARY KEY, keep_id INTEGER, drop_id INTEGER, moved_json TEXT, reason TEXT,
@@ -81,7 +87,9 @@ CREATE TABLE IF NOT EXISTS merge_log (
 CREATE INDEX IF NOT EXISTS ix_ident_person ON identities(person_id);
 CREATE INDEX IF NOT EXISTS ix_aff_org ON affiliations(org);
 CREATE INDEX IF NOT EXISTS ix_events_email ON events(email);
+"""
 
+VIEWS = """
 -- One row per live person: last observed contact on each channel across all their identities.
 DROP VIEW IF EXISTS v_people;
 DROP VIEW IF EXISTS v_people_base;
@@ -106,19 +114,43 @@ FROM v_people_base;
 """
 
 
+def add_column(db, table, col, decl):
+    if col not in {r[1] for r in db.execute(f"PRAGMA table_info({table})")}:
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
+def m1_sync_errors(db):
+    for col in ("last_attempt_at", "last_error", "last_error_at"):
+        add_column(db, "sync_log", col, "TEXT")
+    os.chmod(DB_PATH, 0o600)  # databases created before this tightening was added
+
+
+# Append-only: each step brings PRAGMA user_version from its index to index + 1. Steps must be
+# idempotent, because new databases already have the latest TABLES and run every step once.
+MIGRATIONS = [m1_sync_errors]
+
+
 # ---------- helpers ----------
 
 def connect():
+    if not os.path.exists(DB_PATH):  # create it owner-only before SQLite writes anything into it
+        os.close(os.open(DB_PATH, os.O_CREAT | os.O_WRONLY, 0o600))
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
-    db.executescript(SCHEMA)
+    db.executescript(TABLES)
+    version = db.execute("PRAGMA user_version").fetchone()[0]
+    for i, step in enumerate(MIGRATIONS[version:], version + 1):
+        step(db)
+        db.execute(f"PRAGMA user_version = {i}")
+        db.commit()
+    db.executescript(VIEWS)
     return db
 
 
 def open_ro(path):
     if not os.path.exists(path):
-        raise FileNotFoundError(path)
+        raise FileNotFoundError(f"not found: {path}")
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
     try:
@@ -127,6 +159,84 @@ def open_ro(path):
         raise PermissionError(f"{path}: {e}. Grant Full Disk Access to the app running this "
                               "(System Settings > Privacy & Security > Full Disk Access).")
     return db
+
+
+class FormatChanged(RuntimeError):
+    pass
+
+
+def macos_version():
+    return platform.mac_ver()[0] or "unknown"
+
+
+# Columns each reader uses, checked before querying so a macOS update that renames something
+# fails with a clear message instead of a raw "no such column". (ROWID is implicit, not listed.)
+REQUIRED = {
+    "Contacts": {
+        "ZABCDRECORD": "Z_PK ZUNIQUEID ZFIRSTNAME ZLASTNAME ZORGANIZATION ZJOBTITLE",
+        "ZABCDPHONENUMBER": "ZOWNER ZFULLNUMBER",
+        "ZABCDEMAILADDRESS": "ZOWNER ZADDRESS",
+    },
+    "Messages": {
+        "message": "date is_from_me associated_message_type item_type handle_id text attributedBody",
+        "chat": "style display_name",
+        "handle": "id",
+        "chat_handle_join": "chat_id handle_id",
+        "chat_message_join": "chat_id message_id",
+    },
+    "Calendar": {
+        "Participant": "owner_id email identity_id is_self status",
+        "Identity": "address display_name",
+        "Store": "name",
+        "CalendarItem": "summary start_date",
+        "OccurrenceCache": "event_id occurrence_start_date",
+    },
+    "Mail": {
+        "messages": "sender mailbox subject subject_prefix summary date_received date_sent "
+                    "global_message_id list_id_hash automated_conversation deleted",
+        "addresses": "address comment",
+        "mailboxes": "url",
+        "recipients": "message address",
+        "subjects": "subject",
+        "summaries": "summary",
+    },
+}
+
+
+def check_format(src, source):
+    """Raise FormatChanged if a table or column this source's reader needs is gone."""
+    problems = []
+    for table, cols in REQUIRED[source].items():
+        have = {r[1] for r in src.execute(f"PRAGMA table_info({table})")}
+        if not have:
+            problems.append(f"table {table} is missing")
+            continue
+        missing = [c for c in cols.split() if c not in have]
+        if missing:
+            problems.append(f"{table} has no {', '.join(missing)}")
+    if problems:
+        raise FormatChanged(f"Apple changed the format of {source} on macOS {macos_version()} "
+                            f"({'; '.join(problems)}). The other sources still work; please report "
+                            f"this at {ISSUES_URL}")
+
+
+def open_source(path, source):
+    src = open_ro(path)
+    check_format(src, source)
+    return src
+
+
+def mail_index():
+    """Mail's Envelope Index for the newest Mail data version (V10 over V9; not a string sort,
+    which would pick V9). Older versions are left behind by macOS upgrades and go stale."""
+    files = glob.glob(MAIL_GLOB)
+    if not files:
+        raise FileNotFoundError("No Apple Mail index found (is Mail set up on this Mac, "
+                                "and does this app have Full Disk Access?)")
+    def version(path):
+        m = re.search(r"/V(\d+)/", path)
+        return (int(m.group(1)) if m else -1, os.path.getmtime(path))
+    return max(files, key=version)
 
 
 def norm_phone(raw):
@@ -180,7 +290,22 @@ def norm_name(n):
 
 
 def log_sync(db, source, detail):
-    db.execute("INSERT OR REPLACE INTO sync_log VALUES (?, datetime('now'), ?)", (source, detail))
+    db.execute("""INSERT INTO sync_log (source, last_success_at, detail, last_attempt_at)
+        VALUES (?, datetime('now'), ?, datetime('now'))
+        ON CONFLICT(source) DO UPDATE SET last_success_at=excluded.last_success_at, detail=excluded.detail,
+          last_attempt_at=excluded.last_attempt_at, last_error=NULL, last_error_at=NULL""", (source, detail))
+
+
+def log_failure(db, source, err):
+    """Record why a source failed (after rolling back its partial work), keeping the last success."""
+    db.rollback()
+    msg = str(err) or type(err).__name__
+    db.execute("""INSERT INTO sync_log (source, last_attempt_at, last_error, last_error_at)
+        VALUES (?, datetime('now'), ?, datetime('now'))
+        ON CONFLICT(source) DO UPDATE SET last_attempt_at=excluded.last_attempt_at,
+          last_error=excluded.last_error, last_error_at=excluded.last_error_at""", (source, msg))
+    db.commit()
+    return msg
 
 
 def link_identity(db, kind, value, person_id, source):
@@ -242,7 +367,7 @@ def sync_contacts(db):
         raise FileNotFoundError(f"No AddressBook databases at {CONTACTS_GLOB} (or no Full Disk Access).")
     seen = 0
     for f in files:
-        src = open_ro(f)
+        src = open_source(f, "Contacts")
         cols = {r[1] for r in src.execute("PRAGMA table_info(ZABCDRECORD)")}
         nick = "ZNICKNAME" if "ZNICKNAME" in cols else "NULL"
         recs = src.execute(f"""SELECT Z_PK, ZUNIQUEID, ZFIRSTNAME, ZLASTNAME, ZORGANIZATION, ZJOBTITLE, {nick} AS nick
@@ -318,7 +443,7 @@ def decode_attributed_body(blob):
 
 
 def sync_messages(db):
-    src = open_ro(MESSAGES_DB)
+    src = open_source(MESSAGES_DB, "Messages")
     real = "m.associated_message_type = 0 AND coalesce(m.item_type, 0) = 0"  # no reactions / system rows
     dm = src.execute(f"""
         SELECT h.id AS handle,
@@ -340,7 +465,7 @@ def sync_messages(db):
         WHERE c.style = 43 AND m.is_from_me = 0 AND {real}
         GROUP BY h.id""").fetchall()
     chats = src.execute("""
-        SELECT c.ROWID AS id, c.display_name AS name, c.last_read_message_timestamp AS lr,
+        SELECT c.ROWID AS id, c.display_name AS name,
           (SELECT max(m.date) FROM chat_message_join j JOIN message m ON m.ROWID = j.message_id
              WHERE j.chat_id = c.ROWID) AS last,
           (SELECT count(*) FROM chat_handle_join j WHERE j.chat_id = c.ROWID) AS size
@@ -384,7 +509,7 @@ def sync_messages(db):
 # ---------- sync: Calendar ----------
 
 def sync_calendar(db):
-    src = open_ro(CALENDAR_DB)
+    src = open_source(CALENDAR_DB, "Calendar")
     clean = lambda e: norm_email((e or "").replace("mailto:", ""))
     # My own addresses: participants flagged is_self, plus account names that are emails.
     me = {clean(r[0]) for r in src.execute("""SELECT coalesce(i.address, p.email) FROM Participant p
@@ -411,7 +536,7 @@ def sync_calendar(db):
             occ.setdefault(r[0], set()).add(r[1])
     src.close()
     db.execute("DROP TABLE IF EXISTS events")
-    db.executescript(SCHEMA)
+    db.executescript(TABLES)
     n = 0
     for eid, it in items.items():
         att = attendees[eid]
@@ -436,10 +561,7 @@ def sync_mail(db):
     """Counts human email per address from Mail's local index (headers only, no bodies).
     Mailing lists and Mail's own 'automated' classification are excluded; Gmail's duplicate
     copies (Inbox + All Mail) count once via the global message id."""
-    files = sorted(glob.glob(MAIL_GLOB))
-    if not files:
-        raise FileNotFoundError("No Apple Mail index found (is Mail set up on this Mac?)")
-    src = open_ro(files[-1])
+    src = open_source(mail_index(), "Mail")
     # Gmail keeps sent mail in "All Mail", so direction comes from the sender being one of my
     # addresses (from Calendar accounts, `me add`, and senders found in any Sent folder).
     me = {r[0] for r in db.execute("SELECT address FROM self_addresses")}
@@ -556,17 +678,21 @@ def auto_sync(db):
     """Refresh quietly if data is stale, so answers are current without a scheduler."""
     if os.environ.get("CRM_NO_AUTOSYNC"):
         return
-    r = db.execute("SELECT min(last_success_at) FROM sync_log WHERE source IN ('contacts','messages','calendar')").fetchone()
-    if r[0] and r[0] > (datetime.now(timezone.utc) - timedelta(hours=AUTO_SYNC_HOURS)).strftime("%Y-%m-%d %H:%M:%S"):
+    # Stale = a core source not attempted (successfully or not) within AUTO_SYNC_HOURS, so a
+    # failing source is retried every few hours rather than on every command.
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=AUTO_SYNC_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
+    fresh = db.execute("""SELECT count(*) FROM sync_log WHERE source IN ('contacts','messages','calendar')
+        AND coalesce(last_attempt_at, last_success_at) > ?""", (cutoff,)).fetchone()[0]
+    if fresh == 3:
         return
     failed = []
     for name, fn in SYNCERS.items():
         try:
             fn(db); db.commit()
-        except Exception:
-            db.rollback(); failed.append(name)
-    print(f"(auto-synced; data was older than {AUTO_SYNC_HOURS}h" + (f"; failed: {', '.join(failed)}" if failed else "") + ")",
-          file=sys.stderr)
+        except Exception as e:
+            failed.append(f"{name} ({log_failure(db, name, e)[:120]})")
+    print(f"(auto-synced; data was older than {AUTO_SYNC_HOURS}h" +
+          (f"; failed: {'; '.join(failed)}. Run: python3 crm.py doctor" if failed else "") + ")", file=sys.stderr)
 
 
 def cmd_me(db, a):
@@ -583,15 +709,22 @@ def cmd_sync(db, a):
     bad = [s for s in sources if s not in SYNCERS]
     if bad:
         sys.exit(f"unknown source(s): {', '.join(bad)} (choose from {', '.join(SYNCERS)})")
+    failed = False
     for s in sources:
         try:
             print(SYNCERS[s](db))
             db.commit()
         except Exception as e:
-            db.rollback()
-            print(f"{s}: FAILED - {e}")
+            print(f"{s}: FAILED - {log_failure(db, s, e)}")
+            failed = True
     if a.linkedin:
-        print(sync_linkedin(db, a.linkedin)); db.commit()
+        try:
+            print(sync_linkedin(db, a.linkedin)); db.commit()
+        except Exception as e:
+            print(f"linkedin: FAILED - {log_failure(db, 'linkedin', e)}")
+            failed = True
+    if failed:
+        print("Run `python3 crm.py doctor` for what to fix.")
 
 
 def cmd_person(db, a):
@@ -644,7 +777,7 @@ def group_label(db, chat_id, exclude=None):
 
 def cmd_grep(db, a):
     """Find conversations mentioning something, across everyone (read live from Messages)."""
-    src = open_ro(MESSAGES_DB)
+    src = open_source(MESSAGES_DB, "Messages")
     q = a.text
     variants = {q, q.lower(), q.capitalize(), q.title()}
     ab = " OR ".join("instr(m.attributedBody, CAST(? AS BLOB)) > 0" for _ in variants)
@@ -766,7 +899,7 @@ def cmd_messages(db, a):
     handles = [r[0] for r in db.execute("SELECT value FROM identities WHERE person_id=? AND kind IN ('phone','email')", (p["id"],))]
     if not handles:
         sys.exit("No phone/email for this person.")
-    src = open_ro(MESSAGES_DB)
+    src = open_source(MESSAGES_DB, "Messages")
     ids = [r["ROWID"] for r in src.execute("SELECT ROWID, id FROM handle") if norm_handle(r["id"]) in handles]
     if not ids:
         sys.exit("No Messages history for this person's numbers/emails.")
@@ -816,7 +949,7 @@ def email_body(path, limit=400):
 def find_emlx(rowids):
     """Locate .emlx files for the given Mail message ids (one walk of the Mail folder)."""
     want, found = {str(r) for r in rowids}, {}
-    root = os.path.dirname(os.path.dirname(sorted(glob.glob(MAIL_GLOB))[-1]))
+    root = os.path.dirname(os.path.dirname(mail_index()))
     for d, _, files in os.walk(root):
         for f in files:
             if f.endswith(".emlx"):
@@ -835,7 +968,7 @@ def cmd_emails(db, a):
     if not mine:
         sys.exit("No email address for this person.")
     me = {r[0] for r in db.execute("SELECT address FROM self_addresses")}
-    src = open_ro(sorted(glob.glob(MAIL_GLOB))[-1])
+    src = open_source(mail_index(), "Mail")
     addr = {r[0]: norm_email(r[1]) for r in src.execute("SELECT ROWID, address FROM addresses")}
     theirs = [i for i, e in addr.items() if e in mine]
     qs = ",".join("?" * len(theirs))
@@ -1024,11 +1157,164 @@ def cmd_dupes(db, a):
 
 def cmd_status(db, a):
     for r in db.execute("SELECT * FROM sync_log ORDER BY source"):
-        print(f"{r['source']}: last success {r['last_success_at']} UTC - {r['detail']}")
+        if r["last_success_at"]:
+            print(f"{r['source']}: last success {r['last_success_at']} UTC - {r['detail']}")
+        else:
+            print(f"{r['source']}: never synced successfully")
+        if r["last_error"]:
+            print(f"  last attempt FAILED {r['last_error_at']} UTC - {r['last_error']}")
     c = db.execute("""SELECT (SELECT count(*) FROM v_people), (SELECT count(*) FROM identities WHERE person_id IS NULL),
         (SELECT min(first_at) FROM msg_stats), (SELECT max(max(coalesce(last_in_at,'')), max(coalesce(last_out_at,''))) FROM msg_stats)""").fetchone()
     print(f"{c[0]} people, {c[1]} unlinked identities. Messages history on this Mac spans {c[2] or '?'} to {c[3] or '?'}.")
     print("Note: Messages only covers what's stored on this Mac; with Messages in iCloud older history may be missing.")
+    if db.execute("SELECT 1 FROM sync_log WHERE last_error IS NOT NULL").fetchone():
+        print("Some sources are failing. Run `python3 crm.py doctor` for what to fix.")
+
+
+SETUP_SECTIONS = {
+    "fda": ("1. Full Disk Access", "1-full-disk-access-required"),
+    "contacts": ("2. Contacts", "2-contacts"),
+    "messages": ("3. Messages", "3-messages-imessage-and-sms"),
+    "calendar": ("4. Calendar", "4-calendar"),
+    "mail": ("5. Mail", "5-mail"),
+    "linkedin": ("6. LinkedIn", "6-linkedin-optional"),
+    "troubleshooting": ("Troubleshooting", "troubleshooting"),
+}
+APPS = {"com.anthropic.claudefordesktop": "Claude", "com.apple.Terminal": "Terminal",
+        "com.googlecode.iterm2": "iTerm", "com.mitchellh.ghostty": "Ghostty", "dev.warp.Warp-Stable": "Warp",
+        "com.microsoft.VSCode": "Visual Studio Code", "com.todesktop.230313mzl4w4u92": "Cursor"}
+
+
+def blocked(path):
+    """True if macOS privacy protection stops us listing the folder that should hold `path`
+    (without Full Disk Access, protected files look like they don't exist)."""
+    d = os.path.dirname(path.split("*")[0])
+    while d and d != "/" and not os.path.isdir(d):
+        d = os.path.dirname(d)
+    try:
+        os.listdir(d)
+        return False
+    except PermissionError:
+        return True
+
+
+def check_source(name):
+    """(state, detail) for reading one source right now: ok, missing, denied, format or error."""
+    if name == "contacts":
+        paths = sorted(set(glob.glob(CONTACTS_GLOB, recursive=True)))
+        pattern = CONTACTS_GLOB
+    elif name == "mail":
+        paths = glob.glob(MAIL_GLOB) and [mail_index()]
+        pattern = MAIL_GLOB
+    else:
+        pattern = MESSAGES_DB if name == "messages" else CALENDAR_DB
+        paths = [pattern] if os.path.exists(pattern) else []
+    if not paths:
+        return ("denied", f"can't see {pattern}") if blocked(pattern) else ("missing", f"nothing at {pattern}")
+    for path in paths:
+        try:
+            open_source(path, name.capitalize()).close()
+        except PermissionError:
+            return "denied", f"can't open {path}"
+        except FormatChanged as e:
+            return "format", str(e)
+        except sqlite3.Error as e:
+            return "error", f"{path}: {e}"
+    return "ok", paths[0] if len(paths) == 1 else f"{len(paths)} address books"
+
+
+def cmd_doctor(db, a):
+    """Check each source's access, format and sync history, pointing at the SETUP.md fix."""
+    problems = []
+    def ok(msg):
+        print(f"  ok    {msg}")
+    def warn(msg, section):
+        title, anchor = SETUP_SECTIONS[section]
+        problems.append(msg)
+        print(f"  WARN  {msg}\n        fix: SETUP.md \"{title}\" {SETUP_URL}#{anchor}")
+    print(f"kith doctor (macOS {macos_version()}, Python {platform.python_version()})")
+
+    states, denied = {}, []
+    for name in SYNCERS:
+        print(f"{name}:")
+        state, detail = states[name] = check_source(name)
+        if state == "ok":
+            ok(f"readable ({detail})")
+        elif state == "denied":
+            denied.append(name)
+            warn(f"no access: {detail}. This app needs Full Disk Access.", "fda")
+        elif state == "missing":
+            warn(f"not set up: {detail}", name)
+        elif state == "format":
+            warn(detail, "troubleshooting")
+        else:
+            warn(f"can't read: {detail}", "troubleshooting")
+        r = db.execute("SELECT * FROM sync_log WHERE source=?", (name,)).fetchone()
+        if r is None:
+            if state == "ok":
+                warn("never synced. Run: python3 crm.py sync " + name, name)
+        else:
+            if r["last_success_at"]:
+                ok(f"last synced {r['last_success_at']} UTC: {r['detail']}")
+            if r["last_error"] and state == "ok":  # if it's failing right now, that was reported above
+                section = "fda" if "Full Disk Access" in r["last_error"] else \
+                          "troubleshooting" if "changed the format" in r["last_error"] else name
+                warn(f"last sync FAILED {r['last_error_at']} UTC: {r['last_error']}", section)
+
+        if name == "messages" and state == "ok":
+            src = open_ro(MESSAGES_DB)
+            first, last = src.execute("SELECT min(date), max(date) FROM message WHERE date > 0").fetchone()
+            src.close()
+            span = days_ago(apple_ts(first))
+            if span is None:
+                warn("no messages on this Mac. Turn on Messages in iCloud.", "messages")
+            elif span < 330:
+                warn(f"history only goes back to {apple_ts(first)[:10]} ({span} days). Messages in iCloud "
+                     "may be off or still downloading.", "messages")
+            else:
+                ok(f"history spans {apple_ts(first)[:10]} to {apple_ts(last)[:10]}")
+            if span is not None and days_ago(apple_ts(last)) > 14:
+                warn(f"newest message is from {apple_ts(last)[:10]}; Messages on this Mac may have stopped syncing.",
+                     "messages")
+        if name == "calendar" and r and r["last_success_at"] and \
+                not db.execute("SELECT 1 FROM events LIMIT 1").fetchone():
+            warn("0 events with other attendees. Is your work calendar added to Calendar.app?", "calendar")
+        if name == "mail" and state == "ok":
+            mine = [x[0] for x in db.execute("SELECT address FROM self_addresses ORDER BY address")]
+            if mine:
+                more = f" and {len(mine) - 4} more" if len(mine) > 4 else ""
+                ok(f"your addresses: {', '.join(mine[:4])}{more} (list: python3 crm.py me; "
+                   "add aliases: python3 crm.py me --add you@x.com)")
+            else:
+                warn("no addresses of yours known, so sent and received mail can't be told apart. "
+                     "Add them with: python3 crm.py me --add you@x.com", "mail")
+            n = db.execute("SELECT count(*), coalesce(sum(n_out), 0) FROM email_stats").fetchone()
+            if n[0] and not n[1]:
+                warn(f"{n[0]} people have emailed you but no sent mail was found. Gmail: show Sent Mail and "
+                     "All Mail in IMAP; also check every address of yours is in `me`.", "mail")
+            elif n[0]:
+                ok(f"{n[0]} human correspondents, {n[1]} sent emails counted")
+
+    if denied:
+        bundle = os.environ.get("__CFBundleIdentifier", "")
+        app = APPS.get(bundle) or bundle or os.environ.get("TERM_PROGRAM") or "the app running this"
+        print(f"\n{', '.join(denied)} blocked: give {app} Full Disk Access, then quit and reopen it.")
+    r = db.execute("SELECT last_success_at FROM sync_log WHERE source='linkedin'").fetchone()
+    print("linkedin (optional):")
+    if r and r[0]:
+        ok(f"last imported {r[0][:10]}")
+    else:
+        print(f"  --    not imported; see SETUP.md \"6. LinkedIn\" {SETUP_URL}#6-linkedin-optional")
+    print("crm.db:")
+    mode = os.stat(DB_PATH).st_mode & 0o777
+    if mode & 0o077:
+        warn(f"{DB_PATH} is readable by other users (mode {mode:o}). Run: chmod 600 \"{DB_PATH}\"",
+             "troubleshooting")
+    else:
+        ok(f"{DB_PATH} (owner-only)")
+    print(f"\n{len(problems)} problem(s) found." if problems else "\nAll good.")
+    if problems:
+        sys.exit(1)
 
 
 def cmd_sql(db, a):
@@ -1080,10 +1366,11 @@ def main():
     s = sp.add_parser("unmerge", help="undo a merge"); s.add_argument("id", type=int); s.set_defaults(f=cmd_unmerge)
     s = sp.add_parser("me", help="list/add my own email addresses"); s.add_argument("--add", action="append"); s.set_defaults(f=cmd_me)
     s = sp.add_parser("status", help="source freshness and coverage"); s.set_defaults(f=cmd_status)
+    s = sp.add_parser("doctor", help="check access, sync health and setup for each source"); s.set_defaults(f=cmd_doctor)
     s = sp.add_parser("sql", help="read-only SQL against crm.db"); s.add_argument("query"); s.add_argument("--limit", type=int, default=200); s.set_defaults(f=cmd_sql)
     a = ap.parse_args()
     db = connect()
-    if a.cmd not in ("sync", "sql"):
+    if a.cmd not in ("sync", "sql", "doctor"):
         auto_sync(db)
     a.f(db, a)
 

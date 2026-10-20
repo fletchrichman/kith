@@ -9,6 +9,8 @@ Read commands auto-sync first when data is more than 6 hours old (takes ~1s).
 - `person <name|id|phone|email>`: identities, employers (with source + as-of date), last messages/email,
   shared group chats, calendar history and upcoming meetings, notes.
 - `search <q>`, `at <org>` (who do I know at X), `catchup [--label friend]`, `recent`, `top`, `unknown`, `status`.
+- `doctor`: per-source access, last sync and last error, setup gaps, each with a SETUP.md link. Run it when a
+  sync FAILS or results look thin (e.g. no emails/messages for someone they clearly talk to).
 - `messages <person> [--grep word] [--groups] [--limit N]`: one person's message text, read live from Messages.
 - `emails <person> [--bodies] [--grep word] [--limit N]`: recent email threads with a person (subject lines;
   `--bodies` adds each email's opening lines), read live from Apple Mail; never stored in crm.db.

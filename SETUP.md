@@ -12,7 +12,17 @@ python3 crm.py sync
 ```
 
 Every source prints one line. A line that says `FAILED` tells you which step to revisit.
-`python3 crm.py status` shows when each source last synced and how far back your Messages history goes.
+At any point, run the checkup:
+
+```bash
+python3 crm.py doctor
+```
+
+It tests Full Disk Access for each source, shows each source's last sync and last error, warns if
+your Messages history covers less than about a year, if kith doesn't know your own email
+addresses, or if no sent mail was found. Every warning links to the step below that fixes it.
+`python3 crm.py status` is the short version: when each source last synced (and why it last
+failed) and how far back your Messages history goes.
 
 ## 1. Full Disk Access (required)
 
@@ -139,6 +149,8 @@ kith re-syncs first, which takes about a second. Run `python3 crm.py sync` any t
 
 ## Troubleshooting
 
+Start with `python3 crm.py doctor`; it checks most of these for you.
+
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | Several sources `FAILED` with permission errors | No Full Disk Access, or the app wasn't restarted | Step 1, then quit and reopen the app |
@@ -148,4 +160,4 @@ kith re-syncs first, which takes about a second. Run `python3 crm.py sync` any t
 | `calendar: 0 events with other attendees` | Work calendar not added to Calendar.app | Step 4 |
 | `mail: FAILED - No Apple Mail index found` | Mail.app has never been set up | Step 5 |
 | People you email show `0` sent | Sent folder hidden from IMAP, or your address isn't in `me` | Steps 5.3 and 5.4 |
-| A source broke right after a macOS update | Apple changed its private database format | Open an issue with the `sync` output |
+| `Apple changed the format of <source> on macOS <version>` | A macOS update changed that app's private database | [Open an issue](https://github.com/fletchrichman/kith/issues) with the `doctor` output; the other sources keep working |

@@ -56,6 +56,8 @@ Gmail or Outlook only reach the CRM if those accounts are added to Apple Mail / 
    then Contacts, Messages in iCloud, Calendar, Apple Mail (including Gmail settings) and the
    LinkedIn export, with a troubleshooting table. The first sync usually reports `FAILED` until
    Full Disk Access is granted. That's expected.
+4. Check it: `python3 crm.py doctor` tests access to each source and flags setup gaps (short
+   Messages history, missing email addresses, no sent mail), each with a link to the fix.
 
 If you move the folder, run `./install.sh --no-sync` again so the skill points at the new path.
 
@@ -104,8 +106,9 @@ See `CLAUDE.md` for the full command list and the rules Claude follows when answ
   but haven't been tested.
 - It reads Apple's private, undocumented database formats (Messages `chat.db`, the AddressBook
   and Calendar SQLite stores, Mail's `Envelope Index`). Apple changes these without notice, so a
-  macOS update can break a source. When that happens the other sources keep working and
-  `python3 crm.py status` shows which one failed. Issues and PRs welcome.
+  macOS update can break a source. When that happens the other sources keep working, the failing
+  one reports "Apple changed the format of <source> on macOS <version>", and `python3 crm.py doctor`
+  shows which one failed and why. Issues (with the `doctor` output) and PRs welcome.
 - Paths can be overridden with environment variables if yours differ: `CRM_DB`,
   `CRM_MESSAGES_DB`, `CRM_CONTACTS_GLOB`, `CRM_CALENDAR_DB`, `CRM_MAIL_GLOB`.
 - macOS only. Linux and Windows have no equivalent data sources.
