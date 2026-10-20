@@ -1,0 +1,32 @@
+CLAUDE.md
+  s_8e9b034f50ca56::t_3440271485175b 12-13
+README.md
+  s_8e9b034f50ca56::t_3440271485175b 59-60,109-111
+crm.py
+  s_8e9b034f50ca56::t_9fbe2bf5ed7815 164-241,293-308,370,446,468,512,564,780,902,952,971
+  s_8e9b034f50ca56::t_51ac17812ef46f 11,25-26,28-29,78-81,90,92,117-132,136-137,141-147,539
+  s_8e9b034f50ca56::t_f822ba10848049 681-686,692-695,712,718-719,721-727,1160-1165,1170-1171
+  s_8e9b034f50ca56::t_d92a05000190cb 153,1259,1285-1287
+  s_8e9b034f50ca56::t_51dfbd7d771ce9 1174-1258,1260-1284,1288-1317,1369,1373
+  s_8e9b034f50ca56::t_50d7120b8d541e 1172-1173
+SETUP.md
+  s_8e9b034f50ca56::t_3440271485175b 15-25,152-153,163
+skill/crm/SKILL.md
+  s_8e9b034f50ca56::t_3440271485175b 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5858590af8dd14b1e009a206d1f052ea090adb50",
+  "prompts": {},
+  "sessions": {
+    "s_8e9b034f50ca56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f15cd43-53ae-489a-8a1b-9dc0ee63c113",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "fletchrichman <1915836+fletchrichman@users.noreply.github.com>"
+    }
+  }
+}
