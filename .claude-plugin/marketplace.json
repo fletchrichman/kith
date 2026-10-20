@@ -1,0 +1,15 @@
+{
+  "name": "kith",
+  "description": "kith: a local-first personal CRM for Claude Code on macOS.",
+  "owner": {
+    "name": "Fletcher Richman",
+    "url": "https://github.com/fletchrichman"
+  },
+  "plugins": [
+    {
+      "name": "kith",
+      "description": "Ask Claude about the people you know, from Apple Contacts, Messages, Calendar, Mail and LinkedIn, kept locally on your Mac.",
+      "source": "./"
+    }
+  ]
+}

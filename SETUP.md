@@ -11,6 +11,9 @@ Work through the steps in order. After each one, run this from the kith folder:
 python3 crm.py sync
 ```
 
+Installed the plugin instead of cloning? Ask Claude to "sync kith" or "run the kith doctor" wherever
+this guide shows a `python3 crm.py ...` command; it knows where the plugin lives.
+
 Every source prints one line. A line that says `FAILED` tells you which step to revisit.
 At any point, run the checkup:
 

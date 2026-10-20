@@ -28,7 +28,8 @@ fi
 say "Installing the Claude Code skill to $SKILL_DIR"
 mkdir -p "$SKILL_DIR"
 tmp="$(mktemp)"
-sed "s|__CRM_DIR__|$CRM_DIR|g" "$CRM_DIR/skill/crm/SKILL.md" > "$tmp"
+# The skill is written for the plugin; point it at this checkout instead.
+sed "s|\${CLAUDE_PLUGIN_ROOT}|$CRM_DIR|g" "$CRM_DIR/skills/crm/SKILL.md" > "$tmp"
 if [[ -f "$SKILL_DIR/SKILL.md" ]] && ! cmp -s "$tmp" "$SKILL_DIR/SKILL.md"; then
   backup="$SKILL_DIR/SKILL.md.bak-$(date +%Y%m%d%H%M%S)"
   cp "$SKILL_DIR/SKILL.md" "$backup"
@@ -36,6 +37,10 @@ if [[ -f "$SKILL_DIR/SKILL.md" ]] && ! cmp -s "$tmp" "$SKILL_DIR/SKILL.md"; then
 fi
 mv "$tmp" "$SKILL_DIR/SKILL.md"
 echo "Skill points at $CRM_DIR"
+if grep -q '"kith@' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json" 2>/dev/null; then
+  echo "Note: the kith plugin is installed too, so Claude sees two copies of the skill. Keep one:"
+  echo "  claude plugin uninstall kith@kith    or    rm -r \"$SKILL_DIR\""
+fi
 
 if [[ $DO_SYNC == 1 ]]; then
   say "Running the first sync (reads your Mac's data; nothing leaves this machine)"

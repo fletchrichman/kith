@@ -1,0 +1,13 @@
+{
+  "name": "kith",
+  "version": "0.2.0",
+  "description": "Local-first personal CRM for macOS: ask Claude about the people you know, built from Apple Contacts, Messages, Calendar, Mail and a LinkedIn export. Nothing leaves your Mac.",
+  "author": {
+    "name": "Fletcher Richman",
+    "url": "https://github.com/fletchrichman"
+  },
+  "homepage": "https://github.com/fletchrichman/kith",
+  "repository": "https://github.com/fletchrichman/kith",
+  "license": "MIT",
+  "keywords": ["crm", "contacts", "macos", "imessage", "personal"]
+}

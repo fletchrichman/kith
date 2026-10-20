@@ -12,8 +12,12 @@ import argparse, csv, glob, json, os, platform, re, sqlite3, sys
 from datetime import datetime, timezone, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get("CRM_DB", os.path.join(HERE, "crm.db"))
 HOME = os.path.expanduser("~")
+# Your data lives outside the code, so a plugin update (a fresh copy of this folder) or a re-clone
+# keeps it. A crm.db next to crm.py, from older versions of a git checkout, is still used if present.
+DATA_DIR = f"{HOME}/Library/Application Support/kith"
+DB_PATH = os.environ.get("CRM_DB") or (os.path.join(HERE, "crm.db") if os.path.exists(os.path.join(HERE, "crm.db"))
+                                      else os.path.join(DATA_DIR, "crm.db"))
 MESSAGES_DB = os.environ.get("CRM_MESSAGES_DB", f"{HOME}/Library/Messages/chat.db")
 CONTACTS_GLOB = os.environ.get("CRM_CONTACTS_GLOB",
     f"{HOME}/Library/Application Support/AddressBook/**/AddressBook-v22.abcddb")
@@ -134,6 +138,7 @@ MIGRATIONS = [m1_sync_errors]
 
 def connect():
     if not os.path.exists(DB_PATH):  # create it owner-only before SQLite writes anything into it
+        os.makedirs(os.path.dirname(DB_PATH), mode=0o700, exist_ok=True)
         os.close(os.open(DB_PATH, os.O_CREAT | os.O_WRONLY, 0o600))
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
