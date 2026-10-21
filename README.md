@@ -113,6 +113,10 @@ python3 crm.py note "Jane Doe" "Met at the Denver offsite; building an AI note-t
 python3 crm.py dupes
 ```
 
+```bash
+python3 crm.py doctor
+```
+
 See `CLAUDE.md` for the full command list and the rules Claude follows when answering.
 
 ## Privacy
