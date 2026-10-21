@@ -1,0 +1,19 @@
+README.md
+  s_8e9b034f50ca56::t_bb0c9c4d22ad85 116-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e11ffe0bf1c9572ebb276b64bb71a4278d2d2c55",
+  "prompts": {},
+  "sessions": {
+    "s_8e9b034f50ca56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1f15cd43-53ae-489a-8a1b-9dc0ee63c113",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "fletchrichman <1915836+fletchrichman@users.noreply.github.com>"
+    }
+  }
+}
