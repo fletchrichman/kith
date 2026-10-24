@@ -18,5 +18,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m py_compile crm.py
+      - run: python -m compileall -q crm.py kith
       - run: python -m unittest -v
