@@ -138,7 +138,7 @@ MIGRATIONS = [m1_sync_errors]
 
 def connect():
     if not os.path.exists(DB_PATH):  # create it owner-only before SQLite writes anything into it
-        os.makedirs(os.path.dirname(DB_PATH), mode=0o700, exist_ok=True)
+        os.makedirs(os.path.dirname(DB_PATH) or ".", mode=0o700, exist_ok=True)
         os.close(os.open(DB_PATH, os.O_CREAT | os.O_WRONLY, 0o600))
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
@@ -338,8 +338,10 @@ def live(db, pid):
 
 def find_people(db, query):
     q = query.strip()
-    if q.isdigit():
-        return db.execute("SELECT * FROM v_people WHERE id=?", (live(db, int(q)),)).fetchall()
+    if q.isdigit():  # an id, unless no such person (then it may be a phone number typed as digits)
+        rows = db.execute("SELECT * FROM v_people WHERE id=?", (live(db, int(q)),)).fetchall()
+        if rows:
+            return rows
     h = norm_handle(q)
     if h:
         r = db.execute("SELECT person_id FROM identities WHERE value=?", (h,)).fetchone()
@@ -577,7 +579,7 @@ def sync_mail(db):
     skip = [r[0] for r in src.execute("""SELECT ROWID FROM mailboxes WHERE lower(url) LIKE '%spam%'
             OR lower(url) LIKE '%junk%' OR lower(url) LIKE '%trash%' OR lower(url) LIKE '%deleted%'
             OR lower(url) LIKE '%draft%'""")]
-    sk = ",".join("?" * len(skip)) or "NULL"
+    sk = ",".join("?" * len(skip)) or "-1"  # not NULL: "x NOT IN (NULL)" is never true
     human = "coalesce(m.list_id_hash, 0) = 0 AND coalesce(m.automated_conversation, 0) = 0 AND coalesce(m.deleted, 0) = 0"
     stats = {}
     senders = src.execute(f"""SELECT a.address, count(DISTINCT coalesce(m.global_message_id, m.ROWID)) n,
@@ -789,7 +791,7 @@ def cmd_grep(db, a):
     rows = src.execute(f"""SELECT m.date, m.is_from_me, m.text, m.attributedBody, m.handle_id, c.ROWID AS chat_id,
             c.style, c.display_name FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             JOIN chat c ON c.ROWID = cmj.chat_id
-            WHERE m.associated_message_type = 0 AND (m.text LIKE ? OR {ab})
+            WHERE m.associated_message_type = 0 AND coalesce(m.item_type, 0) = 0 AND (m.text LIKE ? OR {ab})
             ORDER BY m.date DESC LIMIT ?""", (f"%{q}%", *variants, a.limit * 3)).fetchall()
     handles = {r[0]: norm_handle(r[1]) for r in src.execute("SELECT ROWID, id FROM handle")}
     chat_handle = {r[0]: handles.get(r[1]) for r in src.execute("SELECT chat_id, handle_id FROM chat_handle_join")}
@@ -913,7 +915,7 @@ def cmd_messages(db, a):
     rows = src.execute(f"""
         SELECT m.date, m.is_from_me, m.text, m.attributedBody, c.style, c.display_name
         FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
-        WHERE {where} AND m.associated_message_type = 0 AND (
+        WHERE {where} AND m.associated_message_type = 0 AND coalesce(m.item_type, 0) = 0 AND (
           (c.style = 45 AND c.ROWID IN (SELECT chat_id FROM chat_handle_join WHERE handle_id IN ({qs})))
           OR (c.style = 43 AND m.handle_id IN ({qs})))
         ORDER BY m.date DESC LIMIT ?""", (*ids, *ids, a.limit * 4 if a.grep else a.limit)).fetchall()
@@ -1066,6 +1068,7 @@ def merge_people(db, keep_id, drop_id, reason):
         "source_keys": [[r[0], r[1]] for r in db.execute("SELECT source, key FROM source_keys WHERE person_id=?", (drop_id,))],
         "affiliations": [[r[0], r[1]] for r in db.execute("SELECT org, source FROM affiliations WHERE person_id=?", (drop_id,))],
         "fields": {k: drop[k] for k in ("relationship", "cadence_days", "company", "title")},
+        "keep_fields": {k: keep[k] for k in ("relationship", "cadence_days", "company", "title")},
     }
     for t in ("identities", "notes", "source_keys"):
         db.execute(f"UPDATE {t} SET person_id=? WHERE person_id=?", (keep_id, drop_id))
@@ -1105,6 +1108,11 @@ def cmd_unmerge(db, a):
     for org, src in moved["affiliations"]:
         db.execute("UPDATE OR IGNORE affiliations SET person_id=? WHERE person_id=? AND org=? AND source=?",
                    (m["drop_id"], m["keep_id"], org, src))
+    # Fields the merge filled in on the kept person from the dropped one go back to empty,
+    # unless you've changed them since (merges logged before keep_fields existed are left alone).
+    for k, before in moved.get("keep_fields", {}).items():
+        if before is None:
+            db.execute(f"UPDATE people SET {k}=NULL WHERE id=? AND {k} IS ?", (m["keep_id"], moved["fields"][k]))
     db.execute("UPDATE people SET merged_into=NULL WHERE id=?", (m["drop_id"],))
     db.execute("UPDATE merge_log SET undone_at=datetime('now') WHERE id=?", (m["id"],))
     db.commit()
@@ -1324,7 +1332,13 @@ def cmd_doctor(db, a):
 
 def cmd_sql(db, a):
     ro = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-    cur = ro.execute(a.query)
+    # mode=ro blocks writes to crm.db; ATTACH would still create or open other files.
+    ro.set_authorizer(lambda action, *_: sqlite3.SQLITE_DENY if action in (sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH)
+                      else sqlite3.SQLITE_OK)
+    try:
+        cur = ro.execute(a.query)
+    except (sqlite3.Error, sqlite3.Warning) as e:
+        sys.exit(f"sql: {e} (read-only: SELECT, WITH, EXPLAIN and read-only PRAGMAs work)")
     cols = [d[0] for d in cur.description or []]
     print(" | ".join(cols))
     for row in cur.fetchmany(a.limit):
