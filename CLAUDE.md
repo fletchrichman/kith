@@ -1,6 +1,6 @@
 # Personal CRM
 
-The user's private relationship database, built and kept entirely on their Mac. `crm.py` (Python stdlib only) builds `crm.db` from
+The user's private relationship database, built and kept entirely on their Mac. `crm.py` (Python stdlib only; code in `kith/`) builds `crm.db` from
 Apple Contacts, Messages, Calendar, Apple Mail's local index and a LinkedIn `Connections.csv`.
 You are the interface: answer questions about people by running `python3 crm.py ...`, never by guessing.
 Read commands auto-sync first when data is more than 6 hours old (takes ~1s).
