@@ -1,6 +1,8 @@
 """status and doctor: source access, sync health and setup gaps."""
 import glob, os, platform, sqlite3, sys
+from datetime import date
 
+from kith import linear
 from kith.config import CALENDAR_DB, CONTACTS_GLOB, DB_PATH, MAIL_GLOB, MESSAGES_DB, SETUP_URL
 from kith.sources import SYNCERS
 from kith.sources.base import FormatChanged, macos_version, open_ro, open_source
@@ -20,6 +22,11 @@ def cmd_status(db, a):
         (SELECT min(first_at) FROM msg_stats), (SELECT max(max(coalesce(last_in_at,'')), max(coalesce(last_out_at,''))) FROM msg_stats)""").fetchone()
     print(f"{c[0]} people, {c[1]} unlinked identities. Messages history on this Mac spans {c[2] or '?'} to {c[3] or '?'}.")
     print("Note: Messages only covers what's stored on this Mac; with Messages in iCloud older history may be missing.")
+    t = db.execute("SELECT count(*), sum(due < ?), sum(due = ?) FROM todos WHERE done_at IS NULL",
+                   (date.today().isoformat(),) * 2).fetchone()
+    if t[0]:
+        urgent = ", ".join(f"{n} {what}" for n, what in ((t[1], "overdue"), (t[2], "due today")) if n)
+        print(f"{t[0]} open todos" + (f" ({urgent})" if urgent else "") + ". Run `python3 crm.py todo` to see them.")
     if db.execute("SELECT 1 FROM sync_log WHERE last_error IS NOT NULL").fetchone():
         print("Some sources are failing. Run `python3 crm.py doctor` for what to fix.")
 
@@ -31,6 +38,7 @@ SETUP_SECTIONS = {
     "calendar": ("4. Calendar", "4-calendar"),
     "mail": ("5. Mail", "5-mail"),
     "linkedin": ("6. LinkedIn", "6-linkedin-optional"),
+    "linear": ("7. Linear", "7-linear-optional"),
     "troubleshooting": ("Troubleshooting", "troubleshooting"),
 }
 
@@ -160,6 +168,19 @@ def cmd_doctor(db, a):
         ok(f"last imported {r[0][:10]}")
     else:
         print(f"  --    not imported; see SETUP.md \"6. LinkedIn\" {SETUP_URL}#6-linkedin-optional")
+    print("linear (optional, to-dos):")
+    if not linear.config(db).get("team_id"):
+        if linear.api_key():
+            print("  --    API key found; connect a team: python3 crm.py todo linear setup --team KEY")
+        else:
+            print(f"  --    not set up; see SETUP.md \"7. Linear\" {SETUP_URL}#7-linear-optional")
+    elif not linear.api_key():
+        warn("no API key: set LINEAR_API_KEY or add it to the Keychain", "linear")
+    else:
+        try:
+            ok(linear.check(db))
+        except linear.LinearError as e:
+            warn(f"can't reach team {linear.config(db)['team_key']}: {e}", "linear")
     print("crm.db:")
     mode = os.stat(DB_PATH).st_mode & 0o777
     if mode & 0o077:

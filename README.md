@@ -12,10 +12,14 @@ and Claude answers questions like:
 - "Who haven't I talked to in a while?"
 - "Who did I talk to about the offsite?"
 - "Remember that Sam just moved to Denver."
+- "Remind me to send Jane the deck by Friday." / "What's on my to-do list?"
 
 Everything stays on your machine (the database is `~/Library/Application Support/kith/crm.db`). Source data is opened read-only, and message and email
 text are never copied into `crm.db`; they're read live from Messages and Mail when you ask.
-It cannot send messages or emails.
+It cannot send messages or emails. The one exception to staying local is opt-in: to-dos can sync with
+[Linear](SETUP.md#7-linear-optional) if you set it up, and then only todos you push (with `--linear`, or
+all new ones with `--push-all`) leave your Mac: their text, due date and done state, never the linked
+person's name unless you add `--share-person`.
 
 ## What it reads
 
@@ -26,6 +30,7 @@ It cannot send messages or emails.
 | Calendar | meetings with people (any account synced to the macOS Calendar app) |
 | Apple Mail | who you email and when, from Mail's local index (any account added to Mail.app) |
 | LinkedIn (optional) | your `Connections.csv` export: current company and title |
+| Linear (optional) | two-way sync for to-dos you choose to push, plus issues assigned to you |
 
 Gmail or Outlook only reach the CRM if those accounts are added to Apple Mail / Calendar.
 
@@ -110,6 +115,14 @@ python3 crm.py note "Jane Doe" "Met at the Denver offsite; building an AI note-t
 ```
 
 ```bash
+python3 crm.py todo add "Send Jane the deck" --person "Jane Doe" --due friday
+```
+
+```bash
+python3 crm.py todo
+```
+
+```bash
 python3 crm.py dupes
 ```
 
@@ -120,7 +133,7 @@ See `CLAUDE.md` for the full command list and the rules Claude follows when answ
 - Your database is `~/Library/Application Support/kith/crm.db`, readable only by your user. A clone
   that already has a `crm.db` next to `crm.py` keeps using it (it's gitignored, like backups and CSVs);
   to share one database between a clone and the plugin, move it to that folder. Never commit or share
-  it: it holds your contacts and your notes about people.
+  it: it holds your contacts and your notes about people and your to-dos.
 - Ask Claude to summarize rather than paste message history into other tools.
 - When you ask Claude about people, the relevant CRM output (names, dates, notes, message
   excerpts you request) is sent to Anthropic as part of your Claude Code conversation, like any

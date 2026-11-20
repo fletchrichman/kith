@@ -145,6 +145,51 @@ The export is a snapshot. kith records the export date and treats titles as "as 
 re-import every few months. Many connections hide their email address, so LinkedIn people are
 matched to your contacts by exact full name. Run `python3 crm.py dupes` afterwards to check.
 
+## 7. Linear (optional)
+
+kith's to-do list works without this. Set it up if you want to-dos to show up in Linear as issues
+assigned to you, and changes made in Linear to come back.
+
+**What leaves your Mac:** only to-dos you push (`todo add ... --linear`, or every new one after
+`--push-all`), as an issue with the to-do's text, due date and done state. The person a to-do is
+about stays in kith unless you add `--share-person`, which writes "About: <name>" in the issue
+description. Your notes, messages and contacts are never sent. `crm.db` stays the source of truth.
+
+1. In Linear, open **Settings > Account > Security & access > Personal API keys** and create a key.
+2. Give it to kith one of two ways. The key is never written to `crm.db` or printed.
+   - In the macOS Keychain (recommended; works from Claude Code without extra setup):
+
+     ```bash
+     security add-generic-password -a "$USER" -s kith-linear -w
+     ```
+
+     It prompts for the key. To replace it later, add `-U`.
+   - Or export `LINEAR_API_KEY` in the environment that runs kith. If it's set, it wins over the
+     Keychain, and setting it to an empty string turns Linear off for that shell.
+3. Connect a team (its key is the prefix of its issue ids, like `ENG` in ENG-12):
+
+   ```bash
+   python3 crm.py todo linear setup --team ENG --project "Personal"
+   ```
+
+   `--project` is optional. Add `--push-all` to push every new to-do without `--linear`
+   (`--no-linear` then keeps one local). `python3 crm.py doctor` should now say the team is reachable.
+4. Use it:
+
+   ```bash
+   python3 crm.py todo add "Send Jane the deck" --person "Jane Doe" --due friday --linear
+   python3 crm.py todo sync --import-assigned
+   ```
+
+   `todo done`, `undo` and `edit` update the linked issue right away. `todo sync` (also run
+   automatically every 6 hours once Linear is set up) pulls title, due date and done/canceled state
+   back for linked to-dos; if both sides changed, the newer change wins. `--import-assigned` adds
+   your open issues in that team as to-dos, once each. Deleting a to-do leaves its issue alone.
+
+If Linear is down or the key is wrong, the to-do is still saved locally, kith prints one
+`Linear: ...` line, and the next `todo sync` catches up. `python3 crm.py todo linear off` stops
+syncing and keeps the links.
+
 ## Keeping it fresh
 
 There's nothing to schedule. When you ask a question and the data is more than 6 hours old,
@@ -163,4 +208,5 @@ Start with `python3 crm.py doctor`; it checks most of these for you.
 | `calendar: 0 events with other attendees` | Work calendar not added to Calendar.app | Step 4 |
 | `mail: FAILED - No Apple Mail index found` | Mail.app has never been set up | Step 5 |
 | People you email show `0` sent | Sent folder hidden from IMAP, or your address isn't in `me` | Steps 5.3 and 5.4 |
+| `Linear: Linear rejected the API key` | Key revoked, or a different key in `LINEAR_API_KEY` | Step 7.2 |
 | `Apple changed the format of <source> on macOS <version>` | A macOS update changed that app's private database | [Open an issue](https://github.com/fletchrichman/kith/issues) with the `doctor` output; the other sources keep working |

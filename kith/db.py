@@ -5,6 +5,26 @@ from kith.config import DB_PATH
 from kith.util import norm_handle, norm_name
 
 
+TODOS = """
+CREATE TABLE IF NOT EXISTS todos (
+  id INTEGER PRIMARY KEY, text TEXT NOT NULL,
+  person_id INTEGER REFERENCES people(id),  -- optional; moves with the person on merge/unmerge
+  due TEXT,                              -- YYYY-MM-DD, your local date
+  created_at TEXT DEFAULT (datetime('now')), done_at TEXT,
+  updated_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),  -- last local change, UTC
+  -- Optional Linear link (kith/linear.py). crm.db stays the source of truth.
+  share_person INTEGER DEFAULT 0,        -- put the person's name in the issue description
+  linear_push INTEGER DEFAULT 0,         -- wants an issue; pending until linear_id is set
+  linear_id TEXT, linear_key TEXT,       -- the issue's id and identifier (ENG-12)
+  linear_updated_at TEXT,                -- the issue's updatedAt when last synced
+  linear_synced_at TEXT                  -- when todo and issue last matched
+);
+CREATE INDEX IF NOT EXISTS ix_todos_person ON todos(person_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ix_todos_linear ON todos(linear_id);
+CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT);  -- settings such as linear.team_id; never secrets
+"""
+
+
 # Current schema, for new databases. Existing ones are brought up to date by MIGRATIONS below.
 TABLES = """
 CREATE TABLE IF NOT EXISTS people (
@@ -35,6 +55,7 @@ CREATE TABLE IF NOT EXISTS notes (
   id INTEGER PRIMARY KEY, person_id INTEGER REFERENCES people(id),
   created_at TEXT DEFAULT (datetime('now')), text TEXT
 );
+""" + TODOS + """
 -- Derived from Messages; fully rebuilt on each sync.
 CREATE TABLE IF NOT EXISTS msg_stats (
   handle TEXT PRIMARY KEY, dm_in INTEGER, dm_out INTEGER,
@@ -59,7 +80,7 @@ CREATE TABLE IF NOT EXISTS sync_log (
   source TEXT PRIMARY KEY, last_success_at TEXT, detail TEXT,
   last_attempt_at TEXT, last_error TEXT, last_error_at TEXT  -- last_error is cleared by the next success
 );
--- Every merge, so it can be undone: which identities/notes/keys moved from dropped to kept.
+-- Every merge, so it can be undone: which identities/notes/todos/keys moved from dropped to kept.
 CREATE TABLE IF NOT EXISTS merge_log (
   id INTEGER PRIMARY KEY, keep_id INTEGER, drop_id INTEGER, moved_json TEXT, reason TEXT,
   merged_at TEXT DEFAULT (datetime('now')), undone_at TEXT
@@ -106,9 +127,13 @@ def m1_sync_errors(db):
     os.chmod(DB_PATH, 0o600)  # databases created before this tightening was added
 
 
+def m2_todos(db):
+    db.executescript(TODOS)
+
+
 # Append-only: each step brings PRAGMA user_version from its index to index + 1. Steps must be
 # idempotent, because new databases already have the latest TABLES and run every step once.
-MIGRATIONS = [m1_sync_errors]
+MIGRATIONS = [m1_sync_errors, m2_todos]
 
 
 def connect():

@@ -10,12 +10,13 @@ def merge_people(db, keep_id, drop_id, reason):
     moved = {
         "identities": [[r[0], r[1]] for r in db.execute("SELECT kind, value FROM identities WHERE person_id=?", (drop_id,))],
         "notes": [r[0] for r in db.execute("SELECT id FROM notes WHERE person_id=?", (drop_id,))],
+        "todos": [r[0] for r in db.execute("SELECT id FROM todos WHERE person_id=?", (drop_id,))],
         "source_keys": [[r[0], r[1]] for r in db.execute("SELECT source, key FROM source_keys WHERE person_id=?", (drop_id,))],
         "affiliations": [[r[0], r[1]] for r in db.execute("SELECT org, source FROM affiliations WHERE person_id=?", (drop_id,))],
         "fields": {k: drop[k] for k in ("relationship", "cadence_days", "company", "title")},
         "keep_fields": {k: keep[k] for k in ("relationship", "cadence_days", "company", "title")},
     }
-    for t in ("identities", "notes", "source_keys"):
+    for t in ("identities", "notes", "todos", "source_keys"):
         db.execute(f"UPDATE {t} SET person_id=? WHERE person_id=?", (keep_id, drop_id))
     db.execute("UPDATE OR IGNORE affiliations SET person_id=? WHERE person_id=?", (keep_id, drop_id))
     db.execute("""UPDATE people SET relationship=coalesce(relationship, ?), cadence_days=coalesce(cadence_days, ?),
@@ -48,6 +49,8 @@ def cmd_unmerge(db, a):
                    (m["drop_id"], kind, value, m["keep_id"]))
     for nid in moved["notes"]:
         db.execute("UPDATE notes SET person_id=? WHERE id=?", (m["drop_id"], nid))
+    for tid in moved.get("todos", []):  # merges logged before todos existed have none
+        db.execute("UPDATE todos SET person_id=? WHERE id=? AND person_id=?", (m["drop_id"], tid, m["keep_id"]))
     for src, key in moved["source_keys"]:
         db.execute("UPDATE source_keys SET person_id=? WHERE source=? AND key=?", (m["drop_id"], src, key))
     for org, src in moved["affiliations"]:

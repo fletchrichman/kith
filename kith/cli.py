@@ -7,6 +7,7 @@ from kith.commands.merge import cmd_dupes, cmd_merge, cmd_unmerge
 from kith.commands.people import cmd_at, cmd_catchup, cmd_person, cmd_recent, cmd_search, cmd_top, cmd_unknown
 from kith.commands.sql import cmd_sql
 from kith.commands.sync import auto_sync, cmd_sync
+from kith.commands.todos import cmd_todo
 from kith.commands.writes import cmd_add, cmd_link, cmd_me, cmd_note, cmd_set
 from kith.db import connect
 
@@ -38,6 +39,26 @@ def main():
     s.add_argument("query"); s.add_argument("--limit", type=int, default=25); s.add_argument("--grep")
     s.add_argument("--bodies", action="store_true"); s.set_defaults(f=cmd_emails)
     s = sp.add_parser("note", help="add a note to a person"); s.add_argument("query"); s.add_argument("text"); s.set_defaults(f=cmd_note)
+    s = sp.add_parser("todo", help="to-do list: open items, overdue first (add/done/undo/rm/edit)")
+    s.add_argument("--all", action="store_true", help="include done items"); s.add_argument("--done", action="store_true", help="only done items")
+    s.add_argument("--person", dest="list_person", metavar="PERSON", help="only items about this person"); s.set_defaults(f=cmd_todo)
+    ts = s.add_subparsers(dest="action")
+    due_help = "YYYY-MM-DD, today, tomorrow, a weekday, +3d or +2w"
+    t = ts.add_parser("add", help="add an item"); t.add_argument("text"); t.add_argument("--person"); t.add_argument("--due", help=due_help)
+    t.add_argument("--linear", action="store_const", const=True, help="also create a Linear issue (after todo linear setup)")
+    t.add_argument("--no-linear", dest="linear", action="store_const", const=False, help="don't, even with --push-all on")
+    t.add_argument("--share-person", action="store_true", help="put the person's name in the Linear issue (off by default)")
+    for name, what in (("done", "mark done"), ("undo", "mark not done"), ("rm", "delete")):
+        ts.add_parser(name, help=what).add_argument("id", type=int)
+    t = ts.add_parser("edit", help="change text, due date or person ('none' clears)"); t.add_argument("id", type=int)
+    t.add_argument("--text"); t.add_argument("--due", help=due_help + ", or none"); t.add_argument("--person", help="a person, or none")
+    t = ts.add_parser("sync", help="sync linked todos with Linear (newer change wins)")
+    t.add_argument("--import-assigned", action="store_true", help="also import open issues assigned to you in the team")
+    t = ts.add_parser("linear", help="opt-in Linear sync: setup or off").add_subparsers(dest="linear_action", required=True)
+    u = t.add_parser("setup", help="connect a Linear team (key from LINEAR_API_KEY or the Keychain)")
+    u.add_argument("--team", required=True, help="team key, e.g. ENG"); u.add_argument("--project", help="project name for new issues")
+    u.add_argument("--push-all", action=argparse.BooleanOptionalAction, help="push every new todo to Linear")
+    t.add_parser("off", help="stop syncing (links are kept)")
     s = sp.add_parser("set", help="set relationship/cadence/snooze/name/company/title")
     s.add_argument("query"); s.add_argument("--relationship"); s.add_argument("--cadence", type=int)
     s.add_argument("--snooze", help="YYYY-MM-DD"); s.add_argument("--name"); s.add_argument("--company"); s.add_argument("--title")
