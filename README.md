@@ -16,7 +16,10 @@ and Claude answers questions like:
 
 Everything stays on your machine (the database is `~/Library/Application Support/kith/crm.db`). Source data is opened read-only, and message and email
 text are never copied into `crm.db`; they're read live from Messages and Mail when you ask.
-It cannot send messages or emails.
+It cannot send messages or emails. The one exception to staying local is opt-in: to-dos can sync with
+[Linear](SETUP.md#7-linear-optional) if you set it up, and then only todos you push (with `--linear`, or
+all new ones with `--push-all`) leave your Mac: their text, due date and done state, never the linked
+person's name unless you add `--share-person`.
 
 ## What it reads
 
@@ -27,6 +30,7 @@ It cannot send messages or emails.
 | Calendar | meetings with people (any account synced to the macOS Calendar app) |
 | Apple Mail | who you email and when, from Mail's local index (any account added to Mail.app) |
 | LinkedIn (optional) | your `Connections.csv` export: current company and title |
+| Linear (optional) | two-way sync for to-dos you choose to push, plus issues assigned to you |
 
 Gmail or Outlook only reach the CRM if those accounts are added to Apple Mail / Calendar.
 

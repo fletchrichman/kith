@@ -10,9 +10,18 @@ CREATE TABLE IF NOT EXISTS todos (
   id INTEGER PRIMARY KEY, text TEXT NOT NULL,
   person_id INTEGER REFERENCES people(id),  -- optional; moves with the person on merge/unmerge
   due TEXT,                              -- YYYY-MM-DD, your local date
-  created_at TEXT DEFAULT (datetime('now')), done_at TEXT
+  created_at TEXT DEFAULT (datetime('now')), done_at TEXT,
+  updated_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now')),  -- last local change, UTC
+  -- Optional Linear link (kith/linear.py). crm.db stays the source of truth.
+  share_person INTEGER DEFAULT 0,        -- put the person's name in the issue description
+  linear_push INTEGER DEFAULT 0,         -- wants an issue; pending until linear_id is set
+  linear_id TEXT, linear_key TEXT,       -- the issue's id and identifier (ENG-12)
+  linear_updated_at TEXT,                -- the issue's updatedAt when last synced
+  linear_synced_at TEXT                  -- when todo and issue last matched
 );
 CREATE INDEX IF NOT EXISTS ix_todos_person ON todos(person_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ix_todos_linear ON todos(linear_id);
+CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT);  -- settings such as linear.team_id; never secrets
 """
 
 

@@ -70,7 +70,9 @@ class MigrationTest(CRMTestCase):
                                                                       "--due", "2030-01-01"))
         self.assertEqual(self.scalar("PRAGMA user_version"), 2)
         self.assertEqual({r[1] for r in self.query("PRAGMA table_info(todos)")},
-                         {"id", "text", "person_id", "due", "created_at", "done_at"})
+                         {"id", "text", "person_id", "due", "created_at", "done_at", "updated_at", "share_person",
+                          "linear_push", "linear_id", "linear_key", "linear_updated_at", "linear_synced_at"})
+        self.assertEqual(self.scalar("SELECT count(*) FROM config"), 0)
         out = self.out("person", "Pre Todo")
         self.assertIn("note ", out)
         self.assertIn("todo #1 Write back", out)

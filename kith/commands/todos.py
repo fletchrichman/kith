@@ -2,7 +2,9 @@
 import re, sys
 from datetime import date, timedelta
 
+from kith import linear
 from kith.db import one_person
+from kith.linear import NOW, LinearError
 
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
@@ -49,7 +51,8 @@ def todo_line(t, show_person=True):
     if show_person and t["person_id"]:
         extra.append(f"{t['person']} [{t['person_id']}]")
     done = f"done {t['done_at'][:10]}: " if t["done_at"] else ""
-    return f"#{t['id']} {done}{t['text']}" + (f"  ({'; '.join(extra)})" if extra else "")
+    issue = f"[{t['linear_key']}] " if t["linear_key"] else "[Linear pending] " if t["linear_push"] else ""
+    return f"#{t['id']} {issue}{done}{t['text']}" + (f"  ({'; '.join(extra)})" if extra else "")
 
 
 def open_todos(db, person_id=None):
@@ -71,37 +74,69 @@ def cmd_todo(db, a):
     action = getattr(a, "action", None)
     if action == "add":
         pid = one_person(db, a.person)["id"] if a.person else None
-        tid = db.execute("INSERT INTO todos (text, person_id, due) VALUES (?,?,?)",
-                         (a.text, pid, parse_due(a.due) if a.due else None)).lastrowid
+        push = a.linear if a.linear is not None else linear.config(db).get("push_all") == "1"
+        tid = db.execute("INSERT INTO todos (text, person_id, due, linear_push, share_person) VALUES (?,?,?,?,?)",
+                         (a.text, pid, parse_due(a.due) if a.due else None, push, a.share_person)).lastrowid
         db.commit()
+        linear.push_change(db, tid, {})
         print(f"Added {todo_line(get_todo(db, tid))}")
     elif action in ("done", "undo"):
         t = get_todo(db, a.id)
         if bool(t["done_at"]) == (action == "done"):
             sys.exit(f"#{a.id} is {'already done' if t['done_at'] else 'not done'}.")
-        db.execute("UPDATE todos SET done_at = CASE WHEN ? THEN datetime('now') END WHERE id=?", (action == "done", a.id))
+        db.execute(f"UPDATE todos SET done_at = CASE WHEN ? THEN datetime('now') END, updated_at={NOW} WHERE id=?",
+                   (action == "done", a.id))
         db.commit()
+        linear.push_change(db, a.id, {"done": action == "done"})
         print(("Done: " if action == "done" else "Reopened: ") + todo_line(get_todo(db, a.id)))
     elif action == "rm":
         t = get_todo(db, a.id)
         db.execute("DELETE FROM todos WHERE id=?", (a.id,))
         db.commit()
-        print(f"Removed {todo_line(t)}")
+        print(f"Removed {todo_line(t)}" + (f"\nLinear issue {t['linear_key']} is left as it is." if t["linear_key"] else ""))
     elif action == "edit":
         get_todo(db, a.id)
         if a.text is None and a.due is None and a.person is None:
             sys.exit("Nothing to change: give --text, --due or --person.")
+        fields = {}
         if a.text is not None:
             db.execute("UPDATE todos SET text=? WHERE id=?", (a.text, a.id))
+            fields["title"] = a.text
         if a.due is not None:
-            db.execute("UPDATE todos SET due=? WHERE id=?", (parse_due(a.due), a.id))
+            fields["dueDate"] = parse_due(a.due)
+            db.execute("UPDATE todos SET due=? WHERE id=?", (fields["dueDate"], a.id))
         if a.person is not None:
             pid = None if a.person.strip().lower() in ("", "none") else one_person(db, a.person)["id"]
             db.execute("UPDATE todos SET person_id=? WHERE id=?", (pid, a.id))
+        db.execute(f"UPDATE todos SET updated_at={NOW} WHERE id=?", (a.id,))
         db.commit()
+        if fields:
+            linear.push_change(db, a.id, fields)
         print(f"Updated {todo_line(get_todo(db, a.id))}")
+    elif action == "sync":
+        try:
+            print(f"Linear sync: {linear.sync(db, a.import_assigned)}.")
+        except LinearError as e:
+            sys.exit(f"Linear: {e}")
+    elif action == "linear":
+        cmd_linear(db, a)
     else:
         list_todos(db, a)
+
+
+def cmd_linear(db, a):
+    if a.linear_action == "off":
+        linear.off(db)
+        print("Linear sync is off. Linked todos keep their issue ids; `todo linear setup` turns it back on.")
+        return
+    try:
+        cfg, me, team = linear.setup(db, a.team, a.project, a.push_all)
+    except LinearError as e:
+        sys.exit(f"Linear: {e}")
+    print(f"Linear set up: new issues go to {team} ({cfg['team_key']})" +
+          (f", project {cfg['project_name']}" if cfg["project_name"] else "") + f", assigned to {me}.")
+    print("Push a todo with `todo add ... --linear`" +
+          (" (every new todo is pushed: --push-all is on)." if linear.config(db).get("push_all") == "1" else "."))
 
 
 def list_todos(db, a):

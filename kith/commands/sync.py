@@ -2,6 +2,7 @@
 import os, sys
 from datetime import datetime, timezone, timedelta
 
+from kith import linear
 from kith.config import AUTO_SYNC_HOURS
 from kith.db import log_failure
 from kith.sources import SYNCERS
@@ -15,12 +16,15 @@ def auto_sync(db):
     # Stale = a core source not attempted (successfully or not) within AUTO_SYNC_HOURS, so a
     # failing source is retried every few hours rather than on every command.
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=AUTO_SYNC_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
-    fresh = db.execute("""SELECT count(*) FROM sync_log WHERE source IN ('contacts','messages','calendar')
-        AND coalesce(last_attempt_at, last_success_at) > ?""", (cutoff,)).fetchone()[0]
-    if fresh == 3:
+    fresh = {r[0] for r in db.execute("""SELECT source FROM sync_log WHERE coalesce(last_attempt_at, last_success_at) > ?""",
+                                       (cutoff,))}
+    stale = dict(SYNCERS) if not {"contacts", "messages", "calendar"} <= fresh else {}
+    if linear.config(db).get("team_id") and "linear" not in fresh:  # only once you've opted in
+        stale["linear"] = linear.sync
+    if not stale:
         return
     failed = []
-    for name, fn in SYNCERS.items():
+    for name, fn in stale.items():
         try:
             fn(db); db.commit()
         except Exception as e:

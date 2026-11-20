@@ -11,7 +11,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/CLAUDE.md` before the first command in a session: it
 how to phrase answers honestly (coverage gaps, as-of dates) and the safety rules.
 
 Quick reference: `person <name>`, `at <org>`, `catchup`, `grep "<topic>"`, `messages <name>`, `emails <name> --bodies`, `note <name> "<text>"`,
-`todo`, `todo add "<text>" --person <name> --due friday`, `todo done <id>`, `set <name> --relationship friend --cadence 30`, `dupes`, `status`, `doctor` (when a sync fails or data looks thin).
+`todo`, `todo add "<text>" --person <name> --due friday [--linear]`, `todo done <id>`, `todo sync`, `set <name> --relationship friend --cadence 30`, `dupes`, `status`, `doctor` (when a sync fails or data looks thin).
 
 First run on a new Mac: run `doctor`, then walk the user through whatever it flags (each warning links to
 the SETUP.md step that fixes it). Full Disk Access must be granted to the app running Claude Code, which then
