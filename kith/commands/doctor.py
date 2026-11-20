@@ -1,5 +1,6 @@
 """status and doctor: source access, sync health and setup gaps."""
 import glob, os, platform, sqlite3, sys
+from datetime import date
 
 from kith.config import CALENDAR_DB, CONTACTS_GLOB, DB_PATH, MAIL_GLOB, MESSAGES_DB, SETUP_URL
 from kith.sources import SYNCERS
@@ -20,6 +21,11 @@ def cmd_status(db, a):
         (SELECT min(first_at) FROM msg_stats), (SELECT max(max(coalesce(last_in_at,'')), max(coalesce(last_out_at,''))) FROM msg_stats)""").fetchone()
     print(f"{c[0]} people, {c[1]} unlinked identities. Messages history on this Mac spans {c[2] or '?'} to {c[3] or '?'}.")
     print("Note: Messages only covers what's stored on this Mac; with Messages in iCloud older history may be missing.")
+    t = db.execute("SELECT count(*), sum(due < ?), sum(due = ?) FROM todos WHERE done_at IS NULL",
+                   (date.today().isoformat(),) * 2).fetchone()
+    if t[0]:
+        urgent = ", ".join(f"{n} {what}" for n, what in ((t[1], "overdue"), (t[2], "due today")) if n)
+        print(f"{t[0]} open todos" + (f" ({urgent})" if urgent else "") + ". Run `python3 crm.py todo` to see them.")
     if db.execute("SELECT 1 FROM sync_log WHERE last_error IS NOT NULL").fetchone():
         print("Some sources are failing. Run `python3 crm.py doctor` for what to fix.")
 

@@ -2,6 +2,7 @@
 import re
 from datetime import datetime, timezone
 
+from kith.commands.todos import open_todos, todo_line
 from kith.db import find_people, one_person
 from kith.util import ago, days_ago
 
@@ -44,6 +45,8 @@ def cmd_person(db, a):
         print(f"  {when}: {e['start_at'][:10]} {e['title']} [{e['n_attendees']} others]{extra}")
     for n in db.execute("SELECT created_at, text FROM notes WHERE person_id=? ORDER BY created_at", (pid,)):
         print(f"  note {n['created_at'][:10]}: {n['text']}")
+    for t in open_todos(db, pid):
+        print(f"  todo {todo_line(t, show_person=False)}")
 
 
 def group_label(db, chat_id, exclude=None):

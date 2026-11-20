@@ -4,7 +4,7 @@ Messages, Calendar, Apple Mail and (optionally) a LinkedIn Connections.csv expor
 
 Source databases are opened read-only. Message and email text are never copied into
 the CRM; they're read live from Messages and Mail when asked for. Everything you add by
-hand (notes, relationship labels, cadences, links, merges) survives re-syncs.
+hand (notes, todos, relationship labels, cadences, links, merges) survives re-syncs.
 
 The code lives in the kith/ package next to this file; this is the entry point.
 Usage: python3 crm.py <command> [args]   (python3 crm.py -h for the list)

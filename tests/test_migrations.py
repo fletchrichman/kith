@@ -32,6 +32,8 @@ class MigrationTest(CRMTestCase):
         self.assertGreaterEqual(version, 1)
         self.assertEqual(stat.S_IMODE(os.stat(self.db_path).st_mode), 0o600)
         self.assertIn("note ", self.out("person", "Olive Oldtimer"))
+        self.assertIn("Added #1 Call Olive  (Olive Oldtimer [1])", self.out("todo", "add", "Call Olive", "--person", "1"))
+        self.assertIn("todo #1 Call Olive", self.out("person", "Olive Oldtimer"))
 
         # Your data survives a full sync on the upgraded database; your manual link wins.
         self.out("sync", "--linkedin", self.fixtures["LINKEDIN_CSV"])
@@ -53,6 +55,25 @@ class MigrationTest(CRMTestCase):
         self.assertEqual(self.scalar("PRAGMA user_version"), fresh)
         self.assertEqual({r[1] for r in self.query("PRAGMA table_info(sync_log)")}, {"source", "last_success_at", "detail", "last_attempt_at", "last_error",
                                   "last_error_at"})
+
+    def test_upgrade_from_before_todos(self):
+        """A crm.db at user_version 1, written by the release before todos existed."""
+        self.out("status")
+        db = sqlite3.connect(self.db_path)
+        db.execute("DROP TABLE todos")
+        db.execute("INSERT INTO people (id, name) VALUES (7, 'Pre Todo')")
+        db.execute("INSERT INTO notes (person_id, text) VALUES (7, 'Still here')")
+        db.execute("PRAGMA user_version = 1")
+        db.commit()
+        db.close()
+        self.assertIn("Added #1 Write back  (due 2030-01-01", self.out("todo", "add", "Write back", "--person", "7",
+                                                                      "--due", "2030-01-01"))
+        self.assertEqual(self.scalar("PRAGMA user_version"), 2)
+        self.assertEqual({r[1] for r in self.query("PRAGMA table_info(todos)")},
+                         {"id", "text", "person_id", "due", "created_at", "done_at"})
+        out = self.out("person", "Pre Todo")
+        self.assertIn("note ", out)
+        self.assertIn("todo #1 Write back", out)
 
     def test_views_are_rebuilt(self):
         self.make_v0()
