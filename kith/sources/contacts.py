@@ -2,13 +2,17 @@
 import glob
 
 from kith.config import CONTACTS_GLOB
-from kith.db import link_identity, live, log_sync
+from kith.db import link_identity, live, only_person_named
 from kith.sources.base import open_source
 from kith.util import norm_email, norm_name, norm_phone
 
 
+def address_books():
+    return sorted(set(glob.glob(CONTACTS_GLOB, recursive=True)))
+
+
 def sync_contacts(db):
-    files = sorted(set(glob.glob(CONTACTS_GLOB, recursive=True)))
+    files = address_books()
     if not files:
         raise FileNotFoundError(f"No AddressBook databases at {CONTACTS_GLOB} (or no Full Disk Access).")
     seen = 0
@@ -36,8 +40,7 @@ def sync_contacts(db):
                            (pid, r["ZORGANIZATION"].strip(), r["ZJOBTITLE"], "contacts"))
             seen += 1
         src.close()
-    log_sync(db, "contacts", f"{seen} cards from {len(files)} address books")
-    return f"contacts: {seen} cards from {len(files)} address books"
+    return f"{seen} cards from {len(files)} address books"
 
 
 def upsert_contact(db, key, name, company, title, idents):
@@ -57,11 +60,7 @@ def upsert_contact(db, key, name, company, title, idents):
                 break
         if pid is None and len(norm_name(name).split()) >= 2:
             # A LinkedIn-only person (no contact card yet) with exactly this full name.
-            same = db.execute("""SELECT id FROM people WHERE merged_into IS NULL AND lower(name) = ?
-                AND id NOT IN (SELECT person_id FROM source_keys WHERE source = 'contacts')""",
-                (norm_name(name),)).fetchall()
-            if len(same) == 1:
-                pid = same[0]["id"]
+            pid = only_person_named(db, name, "AND id NOT IN (SELECT person_id FROM source_keys WHERE source = 'contacts')")
         if pid is None:
             pid = db.execute("INSERT INTO people (name, company, title) VALUES (?,?,?)",
                              (name, company, title)).lastrowid

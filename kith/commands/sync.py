@@ -3,9 +3,24 @@ import os, sys
 from datetime import datetime, timezone, timedelta
 
 from kith.config import AUTO_SYNC_HOURS
-from kith.db import log_failure
+from kith.db import log_failure, log_sync
 from kith.sources import SYNCERS
 from kith.sources.linkedin import sync_linkedin
+
+
+def sync_one(db, name, fn, quiet=False):
+    """Sync one source in its own transaction and log the outcome. Returns the error message, or None."""
+    try:
+        detail = fn(db)
+        log_sync(db, name, detail)
+        db.commit()
+    except Exception as e:
+        err = log_failure(db, name, e)
+        if not quiet:
+            print(f"{name}: FAILED - {err}")
+        return err
+    if not quiet:
+        print(f"{name}: {detail}")
 
 
 def auto_sync(db):
@@ -19,12 +34,8 @@ def auto_sync(db):
         AND coalesce(last_attempt_at, last_success_at) > ?""", (cutoff,)).fetchone()[0]
     if fresh == 3:
         return
-    failed = []
-    for name, fn in SYNCERS.items():
-        try:
-            fn(db); db.commit()
-        except Exception as e:
-            failed.append(f"{name} ({log_failure(db, name, e)[:120]})")
+    errors = {name: sync_one(db, name, fn, quiet=True) for name, fn in SYNCERS.items()}
+    failed = [f"{name} ({err[:120]})" for name, err in errors.items() if err]
     print(f"(auto-synced; data was older than {AUTO_SYNC_HOURS}h" +
           (f"; failed: {'; '.join(failed)}. Run: python3 crm.py doctor" if failed else "") + ")", file=sys.stderr)
 
@@ -34,19 +45,9 @@ def cmd_sync(db, a):
     bad = [s for s in sources if s not in SYNCERS]
     if bad:
         sys.exit(f"unknown source(s): {', '.join(bad)} (choose from {', '.join(SYNCERS)})")
-    failed = False
-    for s in sources:
-        try:
-            print(SYNCERS[s](db))
-            db.commit()
-        except Exception as e:
-            print(f"{s}: FAILED - {log_failure(db, s, e)}")
-            failed = True
+    jobs = [(s, SYNCERS[s]) for s in sources]
     if a.linkedin:
-        try:
-            print(sync_linkedin(db, a.linkedin)); db.commit()
-        except Exception as e:
-            print(f"linkedin: FAILED - {log_failure(db, 'linkedin', e)}")
-            failed = True
+        jobs.append(("linkedin", lambda db: sync_linkedin(db, a.linkedin)))
+    failed = [name for name, fn in jobs if sync_one(db, name, fn)]
     if failed:
         print("Run `python3 crm.py doctor` for what to fix.")

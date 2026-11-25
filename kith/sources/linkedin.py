@@ -2,8 +2,8 @@
 import csv, os
 from datetime import datetime
 
-from kith.db import link_identity, live, log_sync
-from kith.util import norm_email, norm_name
+from kith.db import link_identity, live, only_person_named
+from kith.util import norm_email
 
 
 def sync_linkedin(db, path):
@@ -20,15 +20,12 @@ def sync_linkedin(db, path):
         email = norm_email(r.get("Email Address"))
         pid = None
         for kind, val in (("linkedin", url), ("email", email)):
-            if val:
-                m = db.execute("SELECT person_id FROM identities WHERE kind=? AND value=? AND person_id IS NOT NULL",
-                               (kind, val)).fetchone()
-                if m:
-                    pid = live(db, m["person_id"]); break
-        if pid is None:
-            same = db.execute("SELECT id FROM v_people WHERE lower(name)=?", (norm_name(name),)).fetchall()
-            if len(same) == 1:  # only a unique exact-name match; otherwise keep an honest duplicate
-                pid = same[0]["id"]
+            m = db.execute("SELECT person_id FROM identities WHERE kind=? AND value=? AND person_id IS NOT NULL",
+                           (kind, val)).fetchone()
+            if val and m:
+                pid = live(db, m["person_id"])
+                break
+        pid = pid or only_person_named(db, name)
         if pid is None:
             pid = db.execute("INSERT INTO people (name) VALUES (?)", (name,)).lastrowid
             created += 1
@@ -42,6 +39,4 @@ def sync_linkedin(db, path):
                 WHERE person_id=? AND source='linkedin' AND lower(org) != lower(?)""", (pid, r["Company"].strip()))
             db.execute("INSERT OR REPLACE INTO affiliations VALUES (?,?,?,?,?)",
                        (pid, r["Company"].strip(), (r.get("Position") or "").strip() or None, "linkedin", as_of))
-    detail = f"{matched} matched, {created} new (snapshot as of {as_of})"
-    log_sync(db, "linkedin", detail)
-    return "linkedin: " + detail
+    return f"{matched} matched, {created} new (snapshot as of {as_of})"

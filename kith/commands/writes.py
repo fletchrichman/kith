@@ -1,6 +1,6 @@
 """Your own edits: me, note, set, add, link. All survive re-syncs."""
-from kith.db import one_person
-from kith.util import norm_email, norm_handle
+from kith.db import link_manual, one_person
+from kith.util import handle_kind, norm_email, norm_handle
 
 
 def cmd_me(db, a):
@@ -33,10 +33,7 @@ def cmd_add(db, a):
     pid = db.execute("INSERT INTO people (name, company, title, relationship) VALUES (?,?,?,?)",
                      (a.name, a.company, a.title, a.relationship)).lastrowid
     for h in a.handle or []:
-        v = norm_handle(h)
-        db.execute("""INSERT INTO identities (kind, value, person_id, source, manual) VALUES (?,?,?, 'manual', 1)
-            ON CONFLICT(kind, value) DO UPDATE SET person_id=excluded.person_id, manual=1""",
-                   ("email" if "@" in v else "phone", v, pid))
+        link_manual(db, handle_kind(norm_handle(h)), norm_handle(h), pid)
     db.commit()
     print(f"Added [{pid}] {a.name}.")
 
@@ -44,8 +41,6 @@ def cmd_add(db, a):
 def cmd_link(db, a):
     v = norm_handle(a.handle) or a.handle.strip().lower()
     p = one_person(db, a.query)
-    kind = "email" if "@" in v else ("linkedin" if "linkedin.com" in v else "phone")
-    db.execute("""INSERT INTO identities (kind, value, person_id, source, manual) VALUES (?,?,?, 'manual', 1)
-        ON CONFLICT(kind, value) DO UPDATE SET person_id=excluded.person_id, manual=1""", (kind, v, p["id"]))
+    link_manual(db, "linkedin" if "linkedin.com" in v and "@" not in v else handle_kind(v), v, p["id"])
     db.commit()
     print(f"Linked {v} -> {p['name']}.")
