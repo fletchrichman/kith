@@ -84,8 +84,7 @@ def safe_to_merge(group):
         return False
     a, b = group
     if a["cards"] and b["cards"]:
-        oa = {o.lower() for o in (a["orgs"] or "").split(",") if o}
-        ob = {o.lower() for o in (b["orgs"] or "").split(",") if o}
+        oa, ob = ({o.lower() for o in (r["orgs"] or "").split(",") if o} for r in group)
         return not (oa and ob and not (oa & ob))
     return True
 

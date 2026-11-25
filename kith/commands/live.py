@@ -100,16 +100,11 @@ def cmd_emails(db, a):
           AND (m.sender IN ({qs}) OR m.ROWID IN (SELECT message FROM recipients WHERE address IN ({qs})))
         ORDER BY m.date_received DESC LIMIT ?""", (*theirs, *theirs, a.limit * 5)).fetchall()
     src.close()
-    seen, out = set(), []
+    first = {}
     for r in rows:
-        if r["gid"] in seen:  # Gmail copies (Inbox + All Mail) count once
-            continue
-        seen.add(r["gid"])
-        if a.grep and a.grep.lower() not in (r["subject"] + " " + (r["summary"] or "")).lower():
-            continue
-        out.append(r)
-        if len(out) >= a.limit:
-            break
+        first.setdefault(r["gid"], r)  # Gmail copies (Inbox + All Mail) count once
+    out = [r for r in first.values()
+           if not a.grep or a.grep.lower() in (r["subject"] + " " + (r["summary"] or "")).lower()][: a.limit]
     bodies = find_emlx([r["ROWID"] for r in out]) if a.bodies else {}
     first = p["name"].split()[0]
     for r in reversed(out):
