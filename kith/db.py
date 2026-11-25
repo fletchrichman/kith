@@ -2,7 +2,7 @@
 import os, sqlite3, sys
 
 from kith.config import DB_PATH
-from kith.util import norm_handle, norm_name
+from kith.util import handle_kind, norm_handle, norm_name
 
 
 # Current schema, for new databases. Existing ones are brought up to date by MIGRATIONS below.
@@ -159,6 +159,26 @@ def link_identity(db, kind, value, person_id, source):
     elif row["person_id"] is None:
         db.execute("UPDATE identities SET person_id=?, source=? WHERE kind=? AND value=?",
                    (person_id, source, kind, value))
+
+
+def add_unlinked(db, source, handles):
+    """Record phones/emails as identities, not yet linked to anyone, unless they're already known."""
+    db.executemany("INSERT OR IGNORE INTO identities (kind, value, source) VALUES (?,?,?)",
+                   [(handle_kind(h), h, source) for h in handles])
+
+
+def link_manual(db, kind, value, person_id):
+    """Your own link: claims the identity from whoever had it, and sync won't move it again."""
+    db.execute("""INSERT INTO identities (kind, value, person_id, source, manual) VALUES (?,?,?, 'manual', 1)
+        ON CONFLICT(kind, value) DO UPDATE SET person_id=excluded.person_id, manual=1""", (kind, value, person_id))
+
+
+def only_person_named(db, name, also=""):
+    """The one live person with exactly this name (plus an optional extra condition), else None:
+    with several, an honest duplicate beats a wrong match."""
+    same = db.execute(f"SELECT id FROM people WHERE merged_into IS NULL AND lower(name)=? {also}",
+                      (norm_name(name),)).fetchall()
+    return same[0]["id"] if len(same) == 1 else None
 
 
 def live(db, pid):

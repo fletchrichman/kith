@@ -1,6 +1,6 @@
 """Calendar sync: meetings with other attendees."""
 from kith.config import CALENDAR_DB
-from kith.db import TABLES, log_sync
+from kith.db import TABLES, add_unlinked
 from kith.sources.base import open_source
 from kith.util import apple_ts, norm_email
 
@@ -42,8 +42,5 @@ def sync_calendar(db):
                 db.execute("INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?,?)",
                            (str(eid), it["summary"], apple_ts(start), email, name, str(status), len(att)))
                 n += 1
-        for email in att:
-            db.execute("INSERT OR IGNORE INTO identities (kind, value, source) VALUES ('email', ?, 'calendar')", (email,))
-    detail = f"{len(items)} events with other attendees, {n} attendee-occurrence rows"
-    log_sync(db, "calendar", detail)
-    return "calendar: " + detail
+        add_unlinked(db, "calendar", att)
+    return f"{len(items)} events with other attendees, {n} attendee-occurrence rows"

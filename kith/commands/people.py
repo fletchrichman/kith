@@ -3,7 +3,7 @@ import re
 from datetime import datetime, timezone
 
 from kith.db import find_people, one_person
-from kith.util import ago, days_ago
+from kith.util import ago, days_ago, latest
 
 
 def cmd_person(db, a):
@@ -57,8 +57,8 @@ def group_label(db, chat_id, exclude=None):
 def cmd_search(db, a):
     rows = find_people(db, a.query)
     for r in rows:
-        last = max(filter(None, [r["last_in_at"], r["last_out_at"]]), default=None)
-        print(f"[{r['id']}] {r['name']}" + (f" - {r['company']}" if r["company"] else "") + f"  | last msg {ago(last)}")
+        print(f"[{r['id']}] {r['name']}" + (f" - {r['company']}" if r["company"] else "") +
+              f"  | last msg {ago(latest(r['last_in_at'], r['last_out_at']))}")
     if not rows:
         print("No matches.")
 
@@ -105,21 +105,20 @@ def cmd_catchup(db, a):
         print("Nobody overdue. (Only people with a relationship label or cadence are considered.)")
 
 
+def print_messaged(db, where, order, limit):
+    for r in db.execute(f"SELECT * FROM v_people WHERE {where} ORDER BY {order} DESC LIMIT ?", (limit,)):
+        print(f"[{r['id']}] {r['name']} ({r['relationship'] or 'unlabeled'}) msgs {r['dm_in']}/{r['dm_out']} "
+              f"last {ago(latest(r['last_in_at'], r['last_out_at']))}")
+
+
 def cmd_recent(db, a):
     """Who you've been talking to lately: optional discovery list for labeling people."""
-    rows = db.execute("""SELECT * FROM v_people WHERE coalesce(dm_in,0) + coalesce(dm_out,0) > 0
-        ORDER BY max(coalesce(last_in_at,''), coalesce(last_out_at,'')) DESC LIMIT ?""", (a.limit,)).fetchall()
-    for r in rows:
-        last = max(filter(None, [r["last_in_at"], r["last_out_at"]]))
-        print(f"[{r['id']}] {r['name']} ({r['relationship'] or 'unlabeled'}) msgs {r['dm_in']}/{r['dm_out']} last {ago(last)}")
+    print_messaged(db, "coalesce(dm_in,0) + coalesce(dm_out,0) > 0",
+                   "max(coalesce(last_in_at,''), coalesce(last_out_at,''))", a.limit)
 
 
 def cmd_top(db, a):
-    rows = db.execute("""SELECT * FROM v_people WHERE coalesce(dm_in,0) > 0 AND coalesce(dm_out,0) > 0
-        ORDER BY dm_in + dm_out DESC LIMIT ?""", (a.limit,)).fetchall()
-    for r in rows:
-        last = max(filter(None, [r["last_in_at"], r["last_out_at"]]))
-        print(f"[{r['id']}] {r['name']} ({r['relationship'] or 'unlabeled'}) msgs {r['dm_in']}/{r['dm_out']} last {ago(last)}")
+    print_messaged(db, "coalesce(dm_in,0) > 0 AND coalesce(dm_out,0) > 0", "dm_in + dm_out", a.limit)
 
 
 def cmd_unknown(db, a):
@@ -128,6 +127,6 @@ def cmd_unknown(db, a):
           AND (s.handle LIKE '%@%' OR length(s.handle) >= 8)  -- skip business short codes
         ORDER BY s.dm_in + s.dm_out DESC LIMIT ?""", (a.limit,)).fetchall()
     for r in rows:
-        print(f"{r['handle']}: msgs {r['dm_in']}/{r['dm_out']}, last {ago(max(filter(None, [r['last_in_at'], r['last_out_at']])))}")
+        print(f"{r['handle']}: msgs {r['dm_in']}/{r['dm_out']}, last {ago(latest(r['last_in_at'], r['last_out_at']))}")
     if not rows:
         print("No unknown two-way handles.")

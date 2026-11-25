@@ -4,6 +4,7 @@ import glob, os, platform, sqlite3, sys
 from kith.config import CALENDAR_DB, CONTACTS_GLOB, DB_PATH, MAIL_GLOB, MESSAGES_DB, SETUP_URL
 from kith.sources import SYNCERS
 from kith.sources.base import FormatChanged, macos_version, open_ro, open_source
+from kith.sources.contacts import address_books
 from kith.sources.mail import mail_index
 from kith.util import apple_ts, days_ago
 
@@ -56,11 +57,9 @@ def blocked(path):
 def check_source(name):
     """(state, detail) for reading one source right now: ok, missing, denied, format or error."""
     if name == "contacts":
-        paths = sorted(set(glob.glob(CONTACTS_GLOB, recursive=True)))
-        pattern = CONTACTS_GLOB
+        pattern, paths = CONTACTS_GLOB, address_books()
     elif name == "mail":
-        paths = glob.glob(MAIL_GLOB) and [mail_index()]
-        pattern = MAIL_GLOB
+        pattern, paths = MAIL_GLOB, glob.glob(MAIL_GLOB) and [mail_index()]
     else:
         pattern = MESSAGES_DB if name == "messages" else CALENDAR_DB
         paths = [pattern] if os.path.exists(pattern) else []
@@ -89,32 +88,27 @@ def cmd_doctor(db, a):
         print(f"  WARN  {msg}\n        fix: SETUP.md \"{title}\" {SETUP_URL}#{anchor}")
     print(f"kith doctor (macOS {macos_version()}, Python {platform.python_version()})")
 
-    states, denied = {}, []
+    denied = []
     for name in SYNCERS:
         print(f"{name}:")
-        state, detail = states[name] = check_source(name)
+        state, detail = check_source(name)
         if state == "ok":
             ok(f"readable ({detail})")
-        elif state == "denied":
+        else:
+            warn(*{"denied": (f"no access: {detail}. This app needs Full Disk Access.", "fda"),
+                   "missing": (f"not set up: {detail}", name),
+                   "format": (detail, "troubleshooting")}.get(state, (f"can't read: {detail}", "troubleshooting")))
+        if state == "denied":
             denied.append(name)
-            warn(f"no access: {detail}. This app needs Full Disk Access.", "fda")
-        elif state == "missing":
-            warn(f"not set up: {detail}", name)
-        elif state == "format":
-            warn(detail, "troubleshooting")
-        else:
-            warn(f"can't read: {detail}", "troubleshooting")
         r = db.execute("SELECT * FROM sync_log WHERE source=?", (name,)).fetchone()
-        if r is None:
-            if state == "ok":
-                warn("never synced. Run: python3 crm.py sync " + name, name)
-        else:
-            if r["last_success_at"]:
-                ok(f"last synced {r['last_success_at']} UTC: {r['detail']}")
-            if r["last_error"] and state == "ok":  # if it's failing right now, that was reported above
-                section = "fda" if "Full Disk Access" in r["last_error"] else \
-                          "troubleshooting" if "changed the format" in r["last_error"] else name
-                warn(f"last sync FAILED {r['last_error_at']} UTC: {r['last_error']}", section)
+        if r is None and state == "ok":
+            warn("never synced. Run: python3 crm.py sync " + name, name)
+        if r and r["last_success_at"]:
+            ok(f"last synced {r['last_success_at']} UTC: {r['detail']}")
+        if r and r["last_error"] and state == "ok":  # if it's failing right now, that was reported above
+            section = "fda" if "Full Disk Access" in r["last_error"] else \
+                      "troubleshooting" if "changed the format" in r["last_error"] else name
+            warn(f"last sync FAILED {r['last_error_at']} UTC: {r['last_error']}", section)
 
         if name == "messages" and state == "ok":
             src = open_ro(MESSAGES_DB)

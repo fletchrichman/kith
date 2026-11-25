@@ -1,11 +1,10 @@
 """Apple Mail: per-address counts from Mail's local index, and live reads of .emlx bodies."""
 import glob, os, re
-from datetime import datetime, timezone
 
 from kith.config import MAIL_GLOB
-from kith.db import link_identity, log_sync
+from kith.db import add_unlinked, link_identity, only_person_named
 from kith.sources.base import open_source
-from kith.util import norm_email, norm_name
+from kith.util import latest, norm_email, utc
 
 
 def mail_index():
@@ -21,6 +20,9 @@ def mail_index():
     return max(files, key=version)
 
 
+# Mailboxes whose mail doesn't count: spam, trash and drafts.
+SKIPPED_MAILBOXES = """(SELECT ROWID FROM mailboxes WHERE lower(url) LIKE '%spam%' OR lower(url) LIKE '%junk%'
+    OR lower(url) LIKE '%trash%' OR lower(url) LIKE '%deleted%' OR lower(url) LIKE '%draft%')"""
 BOTS = re.compile(r"(no-?reply|do-?not-?reply|notifications?@|mailer-daemon|bounce|@.*\.(mailchimp|sendgrid)|calendar-notification)")
 
 
@@ -36,61 +38,52 @@ def sync_mail(db):
           JOIN addresses a ON a.ROWID = m.sender JOIN mailboxes mb ON mb.ROWID = m.mailbox
           WHERE lower(mb.url) LIKE '%sent%'""")}
     me.discard(None)
-    skip = [r[0] for r in src.execute("""SELECT ROWID FROM mailboxes WHERE lower(url) LIKE '%spam%'
-            OR lower(url) LIKE '%junk%' OR lower(url) LIKE '%trash%' OR lower(url) LIKE '%deleted%'
-            OR lower(url) LIKE '%draft%'""")]
-    sk = ",".join("?" * len(skip)) or "-1"  # not NULL: "x NOT IN (NULL)" is never true
     human = "coalesce(m.list_id_hash, 0) = 0 AND coalesce(m.automated_conversation, 0) = 0 AND coalesce(m.deleted, 0) = 0"
     stats = {}
     senders = src.execute(f"""SELECT a.address, count(DISTINCT coalesce(m.global_message_id, m.ROWID)) n,
             max(m.date_received) last FROM messages m JOIN addresses a ON a.ROWID = m.sender
-            WHERE m.mailbox NOT IN ({sk}) AND {human} GROUP BY a.address""", skip).fetchall()
+            WHERE m.mailbox NOT IN {SKIPPED_MAILBOXES} AND {human} GROUP BY a.address""").fetchall()
     my_ids = [r[0] for r in src.execute("SELECT ROWID, address FROM addresses") if norm_email(r[1]) in me]
     for r in senders:
         e = norm_email(r[0])
         if e and e not in me and not BOTS.search(e):
-            s_ = stats.setdefault(e, [0, 0, None, None]); s_[0] += r[1]; s_[2] = max(filter(None, [s_[2], r[2]]), default=None)
+            s_ = stats.setdefault(e, [0, 0, None, None]); s_[0] += r[1]; s_[2] = latest(s_[2], r[2])
     mq = ",".join("?" * len(my_ids)) or "NULL"
     for r in src.execute(f"""SELECT a.address, count(DISTINCT coalesce(m.global_message_id, m.ROWID)) n,
             max(m.date_sent) last FROM messages m JOIN recipients rc ON rc.message = m.ROWID
             JOIN addresses a ON a.ROWID = rc.address
-            WHERE m.sender IN ({mq}) AND m.mailbox NOT IN ({sk}) GROUP BY a.address""", (*my_ids, *skip)):
+            WHERE m.sender IN ({mq}) AND m.mailbox NOT IN {SKIPPED_MAILBOXES} GROUP BY a.address""", my_ids):
         e = norm_email(r[0])
         if e and e not in me:
-            s_ = stats.setdefault(e, [0, 0, None, None]); s_[1] += r[1]; s_[3] = max(filter(None, [s_[3], r[2]]), default=None)
+            s_ = stats.setdefault(e, [0, 0, None, None]); s_[1] += r[1]; s_[3] = latest(s_[3], r[2])
     names = {}
     for r in src.execute("SELECT address, comment FROM addresses WHERE comment IS NOT NULL AND comment != ''"):
         e = norm_email(r[0])
         if e in stats:
             names.setdefault(e, r[1].strip().strip('"\''))
     src.close()
-    ts = lambda v: datetime.fromtimestamp(v, timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if v else None
     db.execute("DELETE FROM email_stats")
     db.executemany("INSERT INTO email_stats VALUES (?,?,?,?,?)",
-                   [(e, a, b, ts(c), ts(d)) for e, (a, b, c, d) in stats.items()])
+                   [(e, a, b, c and utc(c), d and utc(d)) for e, (a, b, c, d) in stats.items()])
     # Only addresses you've written to become identities; inbound-only senders are mostly noise.
     # Two-way correspondents not in Contacts become people, named from the email header.
     created = 0
     for e, (n_in, n_out, _, _) in stats.items():
         if not n_out:
             continue
-        db.execute("INSERT OR IGNORE INTO identities (kind, value, source) VALUES ('email', ?, 'mail')", (e,))
+        add_unlinked(db, "mail", [e])
         linked = db.execute("SELECT person_id FROM identities WHERE kind='email' AND value=?", (e,)).fetchone()[0]
         name = names.get(e, "")
         if linked or not n_in or "@" in name or len(name.split()) < 2:
             continue
-        same = db.execute("SELECT id FROM v_people WHERE lower(name)=?", (norm_name(name),)).fetchall()
-        if len(same) == 1:
-            pid = same[0]["id"]
-        else:
+        pid = only_person_named(db, name)
+        if pid is None:
             pid = db.execute("INSERT INTO people (name) VALUES (?)", (name,)).lastrowid
             created += 1
         db.execute("INSERT OR IGNORE INTO source_keys VALUES ('mail', ?, ?)", (e, pid))
         link_identity(db, "email", e, pid, "mail")
-    detail = (f"{len(stats)} human correspondents, {sum(1 for v in stats.values() if v[1])} you've written to, "
-              f"{created} new people")
-    log_sync(db, "mail", detail)
-    return "mail: " + detail
+    return (f"{len(stats)} human correspondents, {sum(1 for v in stats.values() if v[1])} you've written to, "
+            f"{created} new people")
 
 
 def email_body(path, limit=400):

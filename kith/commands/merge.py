@@ -3,6 +3,7 @@ import json, sys
 
 from kith.db import one_person
 
+FIELDS = ("relationship", "cadence_days", "company", "title")  # filled in on the kept person from the dropped one
 
 def merge_people(db, keep_id, drop_id, reason):
     keep = db.execute("SELECT * FROM people WHERE id=?", (keep_id,)).fetchone()
@@ -12,15 +13,14 @@ def merge_people(db, keep_id, drop_id, reason):
         "notes": [r[0] for r in db.execute("SELECT id FROM notes WHERE person_id=?", (drop_id,))],
         "source_keys": [[r[0], r[1]] for r in db.execute("SELECT source, key FROM source_keys WHERE person_id=?", (drop_id,))],
         "affiliations": [[r[0], r[1]] for r in db.execute("SELECT org, source FROM affiliations WHERE person_id=?", (drop_id,))],
-        "fields": {k: drop[k] for k in ("relationship", "cadence_days", "company", "title")},
-        "keep_fields": {k: keep[k] for k in ("relationship", "cadence_days", "company", "title")},
+        "fields": {k: drop[k] for k in FIELDS},
+        "keep_fields": {k: keep[k] for k in FIELDS},
     }
     for t in ("identities", "notes", "source_keys"):
         db.execute(f"UPDATE {t} SET person_id=? WHERE person_id=?", (keep_id, drop_id))
     db.execute("UPDATE OR IGNORE affiliations SET person_id=? WHERE person_id=?", (keep_id, drop_id))
-    db.execute("""UPDATE people SET relationship=coalesce(relationship, ?), cadence_days=coalesce(cadence_days, ?),
-                  company=coalesce(company, ?), title=coalesce(title, ?) WHERE id=?""",
-               (drop["relationship"], drop["cadence_days"], drop["company"], drop["title"], keep_id))
+    db.execute(f"UPDATE people SET {', '.join(f'{k}=coalesce({k}, ?)' for k in FIELDS)} WHERE id=?",
+               (*(drop[k] for k in FIELDS), keep_id))
     db.execute("UPDATE people SET merged_into=? WHERE id=?", (keep_id, drop_id))
     db.execute("INSERT INTO merge_log (keep_id, drop_id, moved_json, reason) VALUES (?,?,?,?)",
                (keep_id, drop_id, json.dumps(moved), reason))
@@ -84,8 +84,7 @@ def safe_to_merge(group):
         return False
     a, b = group
     if a["cards"] and b["cards"]:
-        oa = {o.lower() for o in (a["orgs"] or "").split(",") if o}
-        ob = {o.lower() for o in (b["orgs"] or "").split(",") if o}
+        oa, ob = ({o.lower() for o in (r["orgs"] or "").split(",") if o} for r in group)
         return not (oa and ob and not (oa & ob))
     return True
 
