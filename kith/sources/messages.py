@@ -5,6 +5,9 @@ from kith.sources.base import open_source
 from kith.util import apple_ts, latest, norm_handle
 
 
+REAL_MESSAGE = "m.associated_message_type = 0 AND coalesce(m.item_type, 0) = 0"  # no reactions / system rows
+
+
 def decode_attributed_body(blob):
     """Newer macOS stores message text only in an NSAttributedString typedstream."""
     if not blob:
@@ -22,7 +25,6 @@ def decode_attributed_body(blob):
 
 def sync_messages(db):
     src = open_source(MESSAGES_DB, "Messages")
-    real = "m.associated_message_type = 0 AND coalesce(m.item_type, 0) = 0"  # no reactions / system rows
     dm = src.execute(f"""
         SELECT h.id AS handle,
           sum(m.is_from_me = 0) AS dm_in, sum(m.is_from_me = 1) AS dm_out, min(m.date) AS first,
@@ -33,14 +35,14 @@ def sync_messages(db):
         JOIN handle h ON h.ROWID = chj.handle_id
         JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
         JOIN message m ON m.ROWID = cmj.message_id
-        WHERE c.style = 45 AND {real}
+        WHERE c.style = 45 AND {REAL_MESSAGE}
         GROUP BY h.id""").fetchall()
     grp = src.execute(f"""
         SELECT h.id AS handle, count(*) AS n, max(m.date) AS last
         FROM message m JOIN handle h ON h.ROWID = m.handle_id
         JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
         JOIN chat c ON c.ROWID = cmj.chat_id
-        WHERE c.style = 43 AND m.is_from_me = 0 AND {real}
+        WHERE c.style = 43 AND m.is_from_me = 0 AND {REAL_MESSAGE}
         GROUP BY h.id""").fetchall()
     chats = src.execute("""
         SELECT c.ROWID AS id, c.display_name AS name,

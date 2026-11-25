@@ -1,14 +1,13 @@
 """Commands that read message and email text live from Messages and Mail (never stored)."""
 import sys
-from datetime import datetime, timezone
 
 from kith.commands.people import group_label
 from kith.config import MESSAGES_DB
 from kith.db import one_person
 from kith.sources.base import open_source
-from kith.sources.mail import email_body, find_emlx, mail_index
-from kith.sources.messages import decode_attributed_body
-from kith.util import apple_ts, norm_email, norm_handle
+from kith.sources.mail import SKIPPED_MAILBOXES, email_body, find_emlx, mail_index
+from kith.sources.messages import REAL_MESSAGE, decode_attributed_body
+from kith.util import apple_ts, norm_email, norm_handle, utc
 
 
 def cmd_grep(db, a):
@@ -20,7 +19,7 @@ def cmd_grep(db, a):
     rows = src.execute(f"""SELECT m.date, m.is_from_me, m.text, m.attributedBody, m.handle_id, c.ROWID AS chat_id,
             c.style, c.display_name FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             JOIN chat c ON c.ROWID = cmj.chat_id
-            WHERE m.associated_message_type = 0 AND coalesce(m.item_type, 0) = 0 AND (m.text LIKE ? OR {ab})
+            WHERE {REAL_MESSAGE} AND (m.text LIKE ? OR {ab})
             ORDER BY m.date DESC LIMIT ?""", (f"%{q}%", *variants, a.limit * 3)).fetchall()
     handles = {r[0]: norm_handle(r[1]) for r in src.execute("SELECT ROWID, id FROM handle")}
     chat_handle = {r[0]: handles.get(r[1]) for r in src.execute("SELECT chat_id, handle_id FROM chat_handle_join")}
@@ -65,7 +64,7 @@ def cmd_messages(db, a):
     rows = src.execute(f"""
         SELECT m.date, m.is_from_me, m.text, m.attributedBody, c.style, c.display_name
         FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id
-        WHERE {where} AND m.associated_message_type = 0 AND coalesce(m.item_type, 0) = 0 AND (
+        WHERE {where} AND {REAL_MESSAGE} AND (
           (c.style = 45 AND c.ROWID IN (SELECT chat_id FROM chat_handle_join WHERE handle_id IN ({qs})))
           OR (c.style = 43 AND m.handle_id IN ({qs})))
         ORDER BY m.date DESC LIMIT ?""", (*ids, *ids, a.limit * 4 if a.grep else a.limit)).fetchall()
@@ -92,14 +91,12 @@ def cmd_emails(db, a):
     addr = {r[0]: norm_email(r[1]) for r in src.execute("SELECT ROWID, address FROM addresses")}
     theirs = [i for i, e in addr.items() if e in mine]
     qs = ",".join("?" * len(theirs))
-    skip = """(SELECT ROWID FROM mailboxes WHERE lower(url) LIKE '%spam%' OR lower(url) LIKE '%junk%'
-               OR lower(url) LIKE '%trash%' OR lower(url) LIKE '%deleted%' OR lower(url) LIKE '%draft%')"""
     rows = src.execute(f"""
         SELECT m.ROWID, m.date_received, m.sender, coalesce(m.subject_prefix, '') || coalesce(s.subject, '') AS subject,
                sm.summary, coalesce(m.global_message_id, -m.ROWID) AS gid,
                (SELECT count(*) FROM recipients r WHERE r.message = m.ROWID) AS n_rcpt
         FROM messages m LEFT JOIN subjects s ON s.ROWID = m.subject LEFT JOIN summaries sm ON sm.ROWID = m.summary
-        WHERE m.mailbox NOT IN {skip} AND coalesce(m.deleted, 0) = 0
+        WHERE m.mailbox NOT IN {SKIPPED_MAILBOXES} AND coalesce(m.deleted, 0) = 0
           AND (m.sender IN ({qs}) OR m.ROWID IN (SELECT message FROM recipients WHERE address IN ({qs})))
         ORDER BY m.date_received DESC LIMIT ?""", (*theirs, *theirs, a.limit * 5)).fetchall()
     src.close()
@@ -118,9 +115,8 @@ def cmd_emails(db, a):
     for r in reversed(out):
         sender = addr.get(r["sender"])
         who = "me" if sender in me else (first if sender in mine else sender)
-        when = datetime.fromtimestamp(r["date_received"], timezone.utc).strftime("%Y-%m-%d")
         others = f" (+{r['n_rcpt'] - 1} others)" if r["n_rcpt"] > 1 else ""
-        print(f"{when} {who}: {r['subject'] or '(no subject)'}{others}")
+        print(f"{utc(r['date_received'])[:10]} {who}: {r['subject'] or '(no subject)'}{others}")
         extra = r["summary"] or ""
         if r["ROWID"] in bodies:
             try:
